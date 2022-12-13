@@ -40,7 +40,7 @@ namespace Test
             // These peptides were taken from the supporting information for the
             // Krokhin, Anal. Chem., 2006 paper
 
-            // Sequence-Specific Retention Calculator. Algorithm for Peptide
+            // Sequence-Specific Retention Calculator. Scheme for Peptide
             //    Retention Prediction in Ion-Pair RP-HPLC: Application to
             //    300- and 100-Å Pore Size C18 Sorbents
 

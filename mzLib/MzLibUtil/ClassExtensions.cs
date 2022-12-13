@@ -18,7 +18,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
+using System.Runtime.Intrinsics.X86;
 
 namespace MzLibUtil
 {
@@ -54,6 +56,36 @@ namespace MzLibUtil
             T[] result = new T[length];
             Array.Copy(data, index, result, 0, length);
             return result;
+        }
+
+        public static int GetNearestIndex(this double[] data, double x )
+        {
+            int index = Array.BinarySearch(data, x);
+            if (index >= 0)
+            {
+                return index;
+            }
+            index = ~index;
+
+            if (index >= data.Length)
+            {
+                return index - 1;
+            }
+            if (index == 0)
+            {
+                return index;
+            }
+
+            if (x - data[index - 1] > data[index] - x)
+            {
+                return index;
+            }
+            return index - 1;
+        }
+
+        public static double GetNearestValue(this double[] data, double x)
+        {
+            return data[data.GetNearestIndex(x)];
         }
 
         /// <summary>

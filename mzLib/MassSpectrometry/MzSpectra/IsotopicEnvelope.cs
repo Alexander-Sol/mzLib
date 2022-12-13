@@ -2,10 +2,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using MassSpectrometry.Scoring;
 
 namespace MassSpectrometry
 {
-    public class IsotopicEnvelope
+    public class IsotopicEnvelope : ISpectralComparable
     {
         public readonly List<(double mz, double intensity)> Peaks;
         public double MonoisotopicMass { get; private set; }
@@ -54,6 +55,16 @@ namespace MassSpectrometry
         public void SetMedianMonoisotopicMass(List<double> monoisotopicMassPredictions)
         {
             MonoisotopicMass = monoisotopicMassPredictions.Median();
+        }
+
+        public double[] GetMzArrayCopy()
+        {
+            return Peaks.OrderBy(p => p.mz).Select(p => p.mz).ToArray();
+        }
+
+        public double[] GetIntensityArrayCopy()
+        {
+            return Peaks.OrderBy(p => p.mz).Select(p => p.intensity).ToArray();
         }
 
     }

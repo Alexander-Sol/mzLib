@@ -26,10 +26,11 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using MassSpectrometry.Scoring;
 
 namespace MassSpectrometry
 {
-    public class MzSpectrum
+    public class MzSpectrum : ISpectralComparable
     {
         private const int numAveraginesToGenerate = 1500;
         private static readonly double[][] allMasses = new double[numAveraginesToGenerate][];
@@ -845,6 +846,20 @@ namespace MassSpectrometry
         private MzPeak GeneratePeak(int index)
         {
             return new MzPeak(XArray[index], YArray[index]);
+        }
+
+        public double[] GetMzArrayCopy()
+        {
+            double[] mzArray = new double[XArray.Length];
+            Array.Copy(XArray, mzArray, mzArray.Length);
+            return mzArray;
+        }
+
+        public double[] GetIntensityArrayCopy()
+        {
+            double[] intensityArray = new double[YArray.Length];
+            Array.Copy(YArray, intensityArray, intensityArray.Length);
+            return intensityArray;
         }
     }
 }
