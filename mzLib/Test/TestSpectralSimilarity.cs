@@ -4,6 +4,7 @@ using MzLibUtil;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
+using MassSpectrometry.Scoring;
 
 namespace Test
 {
@@ -11,6 +12,119 @@ namespace Test
     [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
     public sealed class TestSpectralSimilarity
     {
+        // Test spectra
+        public static MzSpectrum ExperimentalA;
+        public static MzSpectrum TheoreticalA;
+
+        public static MzSpectrum ExperimentalB;
+        public static MzSpectrum TheoreticalB;
+
+        public static MzSpectrum ExperimentalC;
+        public static MzSpectrum TheoreticalC;
+
+        public static MzSpectrum ExperimentalD;
+        public static MzSpectrum TheoreticalD;
+
+        public static MzSpectrum ExperimentalE;
+        public static MzSpectrum TheoreticalE;
+
+        public static MzSpectrum ExperimentalF;
+        public static MzSpectrum TheoreticalF;
+
+        public static MzSpectrum ExperimentalG;
+        public static MzSpectrum TheoreticalG;
+
+        public static MzSpectrum EmptySpectrum;
+
+        [OneTimeSetUp]
+        public void SetUp()
+        {
+            EmptySpectrum = new MzSpectrum(new double[] { }, new double[] { }, false);
+
+            ExperimentalA = new(new double[] { 1, 2, 3, 4, 5 }, new double[] { 2, 4, 6, 8, 10 }, false);
+            TheoreticalA = new(new double[] { 3, 4, 5, 6, 7 }, new double[] { 9, 7, 5, 3, 1 }, false);
+
+            ExperimentalB = new MzSpectrum(new double[] { 1, 2, 3 }, new double[] { 2, 4, 6 }, false);
+            TheoreticalB = new MzSpectrum(new double[] { 1 }, new double[] { 2 }, false);
+
+            // Tolerance and FindNearest stress test
+            ExperimentalC = new MzSpectrum(new double[] { 1, 2, 3, 4 }, new double[] { 4, 3, 2, 1 }, false);
+            TheoreticalC = new MzSpectrum(new double[] { 1.000011, 1.99997, 3.000031, 3.99995 }, new double[] { 1, 2, 3, 4 }, false);
+
+            //What happens when no peaks overlap
+            ExperimentalD = new MzSpectrum(new double[] { 1, 2, 3 }, new double[] { 2, 4, 6 }, false);
+            TheoreticalD = new MzSpectrum(new double[] { 4, 6, 8 }, new double[] { 2, 4, 6 }, false);
+
+            //Test what happens when all overlapping peaks have intensity of 0 (for either theoretical or experimental)
+            ExperimentalE = new MzSpectrum(new double[] { 1, 2, 3, 4 }, new double[] { 0, 4, 0, 8 }, false);
+            TheoreticalE = new MzSpectrum(new double[] { 3, 4, 5, 6 }, new double[] { 2, 0, 4, 0 }, false);
+
+            // This should result in an MzLib exception being thrown by the Scorer, so only needs to be tested once
+            ExperimentalF = ExperimentalB;
+            TheoreticalF = new MzSpectrum(new double[] { 1 }, new double[] { 0 }, false);
+
+            ExperimentalG = ExperimentalB;
+            TheoreticalG = new MzSpectrum(new double[] { 1, 2, 3, 4 }, new double[] { 0, 1, 2 }, false);
+
+        }
+
+        [Test]
+        public void TestSpectralContrastScorer()
+        {
+            Scorer spectralScorer = new Scorer(Scorer.ScoringScheme.SpectralContrastAngle,
+                Scorer.NormalizationScheme.unnormalized,
+                new PpmTolerance(10), thresholdMz: 0);
+
+            // Test w/o normalization
+            Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.73).Within(0.01));
+
+            // Test squareRootSpectrumSum normalization
+            spectralScorer.ChangeNormalizationScheme(Scorer.NormalizationScheme.squareRootSpectrumSum);
+            Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.86).Within(0.01));
+
+            // Test additional normalization schemes
+            spectralScorer.ChangeNormalizationScheme(Scorer.NormalizationScheme.mostAbundantPeak);
+            Assert.That(spectralScorer.Score(ExperimentalB, TheoreticalB), Is.EqualTo(0.17).Within(0.01));
+
+            spectralScorer.ChangeNormalizationScheme(Scorer.NormalizationScheme.spectrumSum);
+            Assert.That(spectralScorer.Score(ExperimentalB, TheoreticalB), Is.EqualTo(0.17).Within(0.01));
+
+            // Test cases C, D, and E
+            Assert.That(spectralScorer.Score(ExperimentalC, TheoreticalC), Is.EqualTo(0.54).Within(0.01));
+
+            Assert.That(spectralScorer.Score(ExperimentalD, TheoreticalD), Is.EqualTo(0.0).Within(0.01));
+
+            Assert.That(spectralScorer.Score(ExperimentalE, TheoreticalE), Is.EqualTo(0.0).Within(0.01));
+
+        }
+
+        [Test]
+        public void TestScorerExceptions()
+        {
+            Scorer spectralScorer = new Scorer(Scorer.ScoringScheme.SpectralContrastAngle,
+                Scorer.NormalizationScheme.unnormalized,
+                new PpmTolerance(10), thresholdMz: 0);
+
+            // Test two empty arrays causes an exception to be thrown by the scorer
+            Assert.Throws<MzLibException>(() =>
+            {
+                spectralScorer.Score(EmptySpectrum, EmptySpectrum);
+            }, "Empty YArray in spectrum.");
+
+            // Tests that an an exception is thrown if one array has a zero intensity value
+            Assert.Throws<MzLibException>(() =>
+            {
+                spectralScorer.Score(ExperimentalF, TheoreticalF);
+            }, "Spectrum has no intensity after truncation");
+
+            // Tests that an an exception is thrown if there is a mismatch in the Mz/Intensity array lengths 
+            // i.e., there is a mz with no corresponding intensity or vice versa
+            Assert.Throws<MzLibException>(() =>
+            {
+                spectralScorer.Score(ExperimentalG, TheoreticalG);
+            }, "Discordance between length of mz and intensity arrays");
+        }
+
         [Test]
         public void TestAllSpectrumSimilaritiesWithoutMzFilter()
         {

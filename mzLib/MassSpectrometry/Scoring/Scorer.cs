@@ -8,10 +8,13 @@ using MzLibUtil;
 namespace MassSpectrometry.Scoring;
 public class Scorer
 {
+    //  Any new scoring algorithms must be included here, inherit from ScoringAlgorithm, and be reflected 
+    // in the ConstructScoringAlgorithm() function
     public enum ScoringScheme
     {
         KullbackLeibler,
-        SpectralContrastAngle
+        SpectralContrastAngle,
+        CosineSimilarity
     }
     public enum NormalizationScheme
     {
@@ -21,7 +24,7 @@ public class Scorer
         unnormalized
     }
     public ScoringScheme ScoreType { get; }
-    public NormalizationScheme Normalization { get; }
+    public NormalizationScheme Normalization { get; private set;  }
     public ScoringAlgorithm Algorithm { get; private set; }
     public PpmTolerance Tolerance { get; }
     public double ThresholdMz { get; }
@@ -56,11 +59,33 @@ public class Scorer
     }
 
     /// <summary>
+    /// Assigns the specific scoring algorithm that will be used by the Scorer
+    /// </summary>
+    /// <exception cref="NotImplementedException"></exception>
+    private void ConstructScoringAlgorithm()
+    {
+        switch (ScoreType)
+        {
+            case ScoringScheme.KullbackLeibler:
+                throw new NotImplementedException();
+            case ScoringScheme.SpectralContrastAngle:
+                Algorithm = new SpectralContrastAlgorithm(Tolerance);
+                break;
+            case ScoringScheme.CosineSimilarity:
+                Algorithm = new CosineSimilarityAlgorithm(Tolerance);
+                break;
+            default:
+                throw new NotImplementedException();
+        }
+    }
+
+    /// <summary>
     /// Here the experimental spectrum should be the longer of the two
     /// </summary>
     /// <param name="experimental"></param>
     /// <param name="theoretical"></param>
     /// <returns></returns>
+    /// <exception cref="MzLibException"></exception>
     public double Score(ISpectralComparable experimental, ISpectralComparable theoretical)
     {
         double[] theoreticalMz = theoretical.GetMzArrayCopy();
@@ -77,13 +102,13 @@ public class Scorer
             throw new MzLibException(string.Format(CultureInfo.InvariantCulture, "Discordance between length of mz and intensity arrays"));
         }
 
-        TruncateBelow(theoreticalMz, theoreticalIntensity, 300);
-        TruncateBelow(experimentalMz, experimentalIntensity, 300);
-
-        Normalize(theoreticalIntensity);
+        TruncateBelow(experimentalMz, experimentalIntensity, ThresholdMz);
+        TruncateBelow(theoreticalMz, theoreticalIntensity, ThresholdMz);
+        
         Normalize(experimentalIntensity);
+        Normalize(theoreticalIntensity);
 
-        return Algorithm.GetScore(theoreticalMz, theoreticalIntensity, experimentalMz, experimentalIntensity);
+        return Algorithm.GetScore(experimentalMz, experimentalIntensity, theoreticalMz, theoreticalIntensity);
     }
 
     /// <summary>
@@ -141,6 +166,15 @@ public class Scorer
     }
 
     /// <summary>
+    /// Change the normalization method used by the Scorer
+    /// </summary>
+    /// <param name="newScheme"> New normalization method</param>
+    public void ChangeNormalizationScheme(NormalizationScheme newScheme)
+    {
+        Normalization = newScheme;
+    }
+
+    /// <summary>
     /// Compares two scores in a method specific fashion. Returns true if the instanceScore (first)
     /// is better than the argumentScore (second). Outputs the better of the two. This method is necessary
     /// because there are some metrics where lower scores are better.
@@ -160,26 +194,6 @@ public class Scorer
 
         betterScore = instanceScore;
         return false;
-    }
-
-
-
-    /// <summary>
-    /// Assigns the specific scoring algorithm that will be used by the Scorer
-    /// </summary>
-    /// <exception cref="NotImplementedException"></exception>
-    private void ConstructScoringAlgorithm()
-    {
-        switch (ScoreType)
-        {
-            case ScoringScheme.KullbackLeibler:
-                throw new NotImplementedException();
-            case ScoringScheme.SpectralContrastAngle:
-                Algorithm = new SpectralContrastAlgorithm(Tolerance);
-                break;
-            default:
-                throw new NotImplementedException();
-        }
     }
 
 }

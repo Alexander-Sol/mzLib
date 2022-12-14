@@ -1,20 +1,19 @@
-﻿using System;
+﻿using MzLibUtil;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using MassSpectrometry.MzSpectra;
-using MzLibUtil;
 
 namespace MassSpectrometry.Scoring
 {
-    public class SpectralContrastAlgorithm : ScoringAlgorithm
+    internal class CosineSimilarityAlgorithm : ScoringAlgorithm
     {
         /// <summary>
-        /// The spectral similarity returns values between 1 and -1 with 1 being closest, -1 being opposite, and 0 being orthogonal
+        /// The cosine similarity returns values between 1 and -1 with 1 being closest, -1 being opposite, and 0 being orthogonal
         /// </summary>
         /// <param name="tolerance"></param>
-        public SpectralContrastAlgorithm(PpmTolerance tolerance) : base(tolerance)
+        public CosineSimilarityAlgorithm(PpmTolerance tolerance) : base(tolerance)
         {
 
         }
@@ -31,7 +30,7 @@ namespace MassSpectrometry.Scoring
         public override double GetScore(double[] experimentalMz, double[] experimentalIntensity,
             double[] theoreticalMz, double[] theoreticalIntensity)
         {
-            double[,] intensityPairs = new double[2, theoreticalMz.Length+theoreticalIntensity.Length];
+            double[,] intensityPairs = new double[2, theoreticalMz.Length];
             try
             {
                 intensityPairs = GetIntensityPairs(theoreticalMz, theoreticalIntensity, experimentalMz,
@@ -45,7 +44,7 @@ namespace MassSpectrometry.Scoring
             double numerator = 0;
             double denominatorValue1 = 0;
             double denominatorValue2 = 0;
-            for (int i =0; i < theoreticalMz.Length; i++)
+            for (int i = 0; i < theoreticalMz.Length; i++)
             {
                 numerator += intensityPairs[0, i] * intensityPairs[1, i];
                 denominatorValue1 += Math.Pow(intensityPairs[0, i], 2);
@@ -59,8 +58,7 @@ namespace MassSpectrometry.Scoring
                 return 0;
             }
 
-            double cosineSimilarity = numerator / Math.Sqrt(denominatorProduct);
-            return (1 - 2 * Math.Acos(cosineSimilarity) / Math.PI);
+            return numerator / Math.Sqrt(denominatorProduct);
         }
     }
 }

@@ -19,7 +19,7 @@ namespace MassSpectrometry.Scoring
         }
 
 
-        public abstract double GetScore(double[] theoreticalMz, double[] theoreticalIntensity, double[] experimentalMz, double[] experimentalIntensity);
+        public abstract double GetScore(double[] experimentalMz, double[] experimentalIntensity, double[] theoreticalMz, double[] theoreticalIntensity);
 
         /// <summary>
         /// Compares two scores in an algorithm specific fashion.
@@ -37,8 +37,8 @@ namespace MassSpectrometry.Scoring
         /// <param name="theoretical"></param>
         /// <param name="experimental"></param>
         /// <returns></returns>
-        public double[,] GetIntensityPairs(double[] theoreticalMz, double[] theoreticalIntensity, 
-            double[] experimentalMz, double[] experimentalIntensity)
+        public double[,] GetIntensityPairs(double[] experimentalMz, double[] experimentalIntensity,
+            double[] theoreticalMz, double[] theoreticalIntensity)
         {
             double[,] intensityPairs = new double[2, theoreticalMz.Length];
             double intensitySum = 0;
