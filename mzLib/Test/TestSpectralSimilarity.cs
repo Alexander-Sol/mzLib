@@ -80,7 +80,7 @@ namespace Test
 
             // Test squareRootSpectrumSum normalization
             spectralScorer.ChangeNormalizationScheme(Scorer.NormalizationScheme.squareRootSpectrumSum);
-            Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.86).Within(0.01));
+            Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.59).Within(0.01));
 
             // Test additional normalization schemes
             spectralScorer.ChangeNormalizationScheme(Scorer.NormalizationScheme.mostAbundantPeak);
