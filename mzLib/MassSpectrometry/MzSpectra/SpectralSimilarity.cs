@@ -221,7 +221,7 @@ namespace MassSpectrometry.MzSpectra
 
         #region similarityMethods
 
-        //The cosine similarity returns values between 1 and -1 with 1 being closes and -1 being opposite and 0 being orthoganal
+        //The cosine similarity returns values between 1 and -1 with 1 being closes and -1 being opposite and 0 being orthogonal
         public double? CosineSimilarity()
         {
             if (_intensityPairs.First().Item1==-1)

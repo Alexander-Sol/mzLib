@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using MassSpectrometry.Scoring;
 using MzLibUtil;
@@ -12,7 +13,6 @@ public class Scorer
         KullbackLeibler,
         SpectralContrastAngle
     }
-
     public enum NormalizationScheme
     {
         squareRootSpectrumSum,
@@ -20,13 +20,11 @@ public class Scorer
         mostAbundantPeak,
         unnormalized
     }
-
     public ScoringScheme ScoreType { get; }
     public NormalizationScheme Normalization { get; }
     public ScoringAlgorithm Algorithm { get; private set; }
-    private double? _poorScore;
     public PpmTolerance Tolerance { get; }
-
+    public double ThresholdMz { get; }
     public double PoorScore
     {
         get
@@ -46,12 +44,46 @@ public class Scorer
             }
         }
     }
+    private double? _poorScore;
 
-    public Scorer(ScoringScheme scoringScheme, NormalizationScheme normalization, PpmTolerance tolerance)
+    public Scorer(ScoringScheme scoringScheme, NormalizationScheme normalization, PpmTolerance tolerance, double thresholdMz = 300)
     {
         ScoreType = scoringScheme;
         Normalization = normalization;
-        ConstructScoringAlgorithm(tolerance);
+        Tolerance = tolerance;
+        ThresholdMz = thresholdMz;
+        ConstructScoringAlgorithm();
+    }
+
+    /// <summary>
+    /// Here the experimental spectrum should be the longer of the two
+    /// </summary>
+    /// <param name="experimental"></param>
+    /// <param name="theoretical"></param>
+    /// <returns></returns>
+    public double Score(ISpectralComparable experimental, ISpectralComparable theoretical)
+    {
+        double[] theoreticalMz = theoretical.GetMzArrayCopy();
+        double[] experimentalMz = experimental.GetMzArrayCopy();
+        double[] theoreticalIntensity = theoretical.GetIntensityArrayCopy();
+        double[] experimentalIntensity = experimental.GetIntensityArrayCopy();
+
+        if (theoreticalIntensity.Length == 0 | experimentalIntensity.Length == 0)
+        {
+            throw new MzLibException(string.Format(CultureInfo.InvariantCulture, "Empty YArray in spectrum."));
+        }
+        if (theoreticalIntensity.Length != theoreticalMz.Length | experimentalIntensity.Length != experimentalMz.Length)
+        {
+            throw new MzLibException(string.Format(CultureInfo.InvariantCulture, "Discordance between length of mz and intensity arrays"));
+        }
+
+        TruncateBelow(theoreticalMz, theoreticalIntensity, 300);
+        TruncateBelow(experimentalMz, experimentalIntensity, 300);
+
+        Normalize(theoreticalIntensity);
+        Normalize(experimentalIntensity);
+
+        return Algorithm.GetScore(theoreticalMz, theoreticalIntensity, experimentalMz, experimentalIntensity);
     }
 
     /// <summary>
@@ -63,6 +95,7 @@ public class Scorer
     /// <param name="thresholdMz"></param>
     public void TruncateBelow(double[] mzArray, double[] intensityArray, double thresholdMz)
     {
+        double cumulativeIntensity = 0;
         for (int i = 0; i < mzArray.Length; i++)
         {
             if (mzArray[i] < thresholdMz)
@@ -70,7 +103,10 @@ public class Scorer
                 mzArray[i] = 0;
                 intensityArray[i] = 0;
             }
+            cumulativeIntensity += intensityArray[i];
         }
+
+        if (!(cumulativeIntensity > 0)) throw new MzLibException(string.Format(CultureInfo.InvariantCulture, "Spectrum has no intensity after truncation."));
     }
 
     /// <summary>
@@ -104,43 +140,6 @@ public class Scorer
         }
     }
 
-    public List<(double, double)> GetIntensityPairs(double[] theoretical, double[] experimental)
-    {
-        List<(double theoretical, double experimental)> intensityPairs = new List<(double, double)> ();
-        for (int i = 0; i < theoretical.Length; i++)
-        {
-            int expIndex = experimental.GetNearestIndex(theoretical[i]);
-            if (Tolerance.Within(theoretical[i], experimental[expIndex]) )
-            {
-                intensityPairs.Add((theoretical[i], experimental[expIndex]));
-            }
-        }
-
-        return intensityPairs;
-    }
-
-    //public double Score(IScoreArgs args)
-    //{
-    //    return GetScore(args);
-    //}
-
-    /// <summary>
-    /// Here the experimental spectrum should be the longer of the two
-    /// </summary>
-    /// <param name="experimental"></param>
-    /// <param name="theoretical"></param>
-    /// <returns></returns>
-    public double Score(ISpectralComparable experimental, ISpectralComparable theoretical)
-    {
-        throw new NotImplementedException();
-    }
-
-//public double Score(MinimalSpectrum experimentalSpectrum, MinimalSpectrum theoreticalSpectrum)
-    //{
-    //    IScoreArgs args = new MinimalSpectraArgs(experimentalSpectrum, theoreticalSpectrum);
-    //    return ScoringScheme.GetScore(args);
-    //}
-
     /// <summary>
     /// Compares two scores in a method specific fashion. Returns true if the instanceScore (first)
     /// is better than the argumentScore (second). Outputs the better of the two. This method is necessary
@@ -153,56 +152,30 @@ public class Scorer
     /// <exception cref="NotImplementedException"></exception>
     public bool TestForScoreImprovement(double instanceScore, double argumentScore, out double betterScore)
     {
-        switch (ScoreType)
-        {
-            case ScoringScheme.KullbackLeibler:
-                if (instanceScore < argumentScore)
-                {
-                    betterScore = instanceScore;
-                    return true;
-                }
-                else
-                {
-                    betterScore = argumentScore;
-                    return false;
-                }
-            case ScoringScheme.SpectralContrastAngle:
-                return DefaultCompare(instanceScore, argumentScore, out betterScore);
-            default:
-                return DefaultCompare(instanceScore, argumentScore, out betterScore);
-        }
-    }
-
-    /// <summary>
-    /// The default score comparison, where higher scores are better. Compares two scores, returns true
-    /// if the instance score is higher than the argument score, returns false if instance score is lower.
-    /// </summary>
-    /// <param name="instanceScore"></param>
-    /// <param name="argumentScore"></param>
-    /// <param name="betterScore"> The higher of the two scores</param>
-    /// <returns></returns>
-    private bool DefaultCompare(double instanceScore, double argumentScore, out double betterScore)
-    {
-        if (instanceScore > argumentScore)
-        {
-            betterScore = instanceScore;
-            return true;
-        }
-        else
+        if (Algorithm.CompareScores(instanceScore, argumentScore) > 0)
         {
             betterScore = argumentScore;
-            return false;
+            return true;
         }
+
+        betterScore = instanceScore;
+        return false;
     }
 
-    private void ConstructScoringAlgorithm(PpmTolerance tolerance)
+
+
+    /// <summary>
+    /// Assigns the specific scoring algorithm that will be used by the Scorer
+    /// </summary>
+    /// <exception cref="NotImplementedException"></exception>
+    private void ConstructScoringAlgorithm()
     {
         switch (ScoreType)
         {
             case ScoringScheme.KullbackLeibler:
                 throw new NotImplementedException();
             case ScoringScheme.SpectralContrastAngle:
-                Algorithm = new SpectralContrastAlgorithm(tolerance);
+                Algorithm = new SpectralContrastAlgorithm(Tolerance);
                 break;
             default:
                 throw new NotImplementedException();
