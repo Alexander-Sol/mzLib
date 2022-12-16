@@ -13,9 +13,14 @@ namespace MassSpectrometry.Scoring
     {
         public PpmTolerance Tolerance { get; }
 
-        public ScoringAlgorithm(PpmTolerance tolerance)
+        // If AllPeaks is set to true, experimental peaks not found in the
+        // theoretical spectrum are used for scoring. Otherwise, they are discarded
+        public bool AllPeaks { get; }
+
+        public ScoringAlgorithm(PpmTolerance tolerance, bool allPeaks = true)
         {
             Tolerance = tolerance;
+            AllPeaks = allPeaks;
         }
 
 
@@ -41,6 +46,7 @@ namespace MassSpectrometry.Scoring
             double[] theoreticalMz, double[] theoreticalIntensity)
         {
             double[,] intensityPairs = new double[2, theoreticalMz.Length];
+            SpectrumTree experimentalTree = new SpectrumTree(experimentalMz, experimentalIntensity);
             double intensitySum = 0;
             for (int i = 0; i < theoreticalMz.Length; i++)
             {
