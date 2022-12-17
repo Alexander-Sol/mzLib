@@ -13,7 +13,7 @@ namespace MassSpectrometry.Scoring
         /// The cosine similarity returns values between 1 and -1 with 1 being closest, -1 being opposite, and 0 being orthogonal
         /// </summary>
         /// <param name="tolerance"></param>
-        public CosineSimilarityAlgorithm(PpmTolerance tolerance) : base(tolerance)
+        public CosineSimilarityAlgorithm(PpmTolerance tolerance, bool allPeaks) : base(tolerance, allPeaks)
         {
 
         }
@@ -30,7 +30,7 @@ namespace MassSpectrometry.Scoring
         public override double GetScore(double[] experimentalMz, double[] experimentalIntensity,
             double[] theoreticalMz, double[] theoreticalIntensity)
         {
-            double[,] intensityPairs = new double[2, theoreticalMz.Length];
+            List<(double, double)> intensityPairs = new();
             try
             {
                 intensityPairs = GetIntensityPairs(theoreticalMz, theoreticalIntensity, experimentalMz,
@@ -44,11 +44,11 @@ namespace MassSpectrometry.Scoring
             double numerator = 0;
             double denominatorValue1 = 0;
             double denominatorValue2 = 0;
-            for (int i = 0; i < theoreticalMz.Length; i++)
+            foreach ((double theoretical, double experimental) pair in intensityPairs)
             {
-                numerator += intensityPairs[0, i] * intensityPairs[1, i];
-                denominatorValue1 += Math.Pow(intensityPairs[0, i], 2);
-                denominatorValue2 += Math.Pow(intensityPairs[1, i], 2);
+                numerator += pair.theoretical * pair.experimental;
+                denominatorValue1 += Math.Pow(pair.theoretical, 2);
+                denominatorValue2 += Math.Pow(pair.experimental, 2);
             }
             double denominatorProduct = denominatorValue1 * denominatorValue2;
 
@@ -57,7 +57,6 @@ namespace MassSpectrometry.Scoring
             {
                 return 0;
             }
-
             return numerator / Math.Sqrt(denominatorProduct);
         }
     }

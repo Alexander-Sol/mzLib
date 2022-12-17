@@ -213,8 +213,9 @@ namespace MzLibUtil
 
         internal static Node GetMinNode(Node parent)
         {
-            Node current = parent;
+            if (parent == null) return null;
 
+            Node current = parent;
             while (current.leftChild != null)
             {
                 current = current.leftChild;
@@ -297,7 +298,7 @@ namespace MzLibUtil
         public TreeEnumerator(Node root)
         {
             _rootNode = root;
-            _nextNode = SpectrumTree.GetMinNode(_rootNode);
+            _nextNode = _rootNode != null ? SpectrumTree.GetMinNode(_rootNode) : null;
         }
 
         public bool MoveNext()

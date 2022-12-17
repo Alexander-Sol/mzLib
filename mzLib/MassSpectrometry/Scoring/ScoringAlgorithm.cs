@@ -4,6 +4,7 @@ using System.Dynamic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Easy.Common.Extensions;
 using MzLibUtil;
 
 
@@ -15,7 +16,7 @@ namespace MassSpectrometry.Scoring
 
         // If AllPeaks is set to true, experimental peaks not found in the
         // theoretical spectrum are used for scoring. Otherwise, they are discarded
-        public bool AllPeaks { get; }
+        public bool AllPeaks { get; set; }
 
         public ScoringAlgorithm(PpmTolerance tolerance, bool allPeaks = true)
         {
@@ -36,30 +37,40 @@ namespace MassSpectrometry.Scoring
 
         /// <summary>
         /// Finds matching peaks within the theoretical and experimental mzArrays, then stores the corresponding intensities
-        /// to a two dimensional matrix. The first dimension (rows) represents theoretical (Index 0) vs experimental (Index 1).
-        /// The second dimension (columns) represents paired intensity values
+        /// to a list of (double, double) tuples. The first entry in the tuple corresponds to the theoretical
+        /// intensity and the second entry corresponds to the experimental intensity
         /// </summary>
         /// <param name="theoretical"></param>
         /// <param name="experimental"></param>
         /// <returns></returns>
-        public double[,] GetIntensityPairs(double[] experimentalMz, double[] experimentalIntensity,
+        public List<(double, double)> GetIntensityPairs(double[] experimentalMz, double[] experimentalIntensity,
             double[] theoreticalMz, double[] theoreticalIntensity)
         {
-            double[,] intensityPairs = new double[2, theoreticalMz.Length];
+            List<(double, double)> intensityPairs = new List<(double theoretical, double experimental)>();
             SpectrumTree experimentalTree = new SpectrumTree(experimentalMz, experimentalIntensity);
-            double intensitySum = 0;
+            int matchesFound = 0;
             for (int i = 0; i < theoreticalMz.Length; i++)
             {
-                int expIndex = experimentalMz.GetNearestIndex(theoreticalMz[i]);
-                if (Tolerance.Within(theoreticalMz[i], experimentalMz[expIndex]))
+                if (experimentalTree.PopClosestPeak(theoreticalMz[i], Tolerance,
+                        out var experimentalPeakMz, out var experimentalPeakIntensity))
                 {
-                    intensityPairs[0, i] = theoreticalIntensity[i];
-                    intensityPairs[1, i] = experimentalIntensity[expIndex];
-                    intensitySum += intensityPairs[1, i];
+                    intensityPairs.Add((theoreticalIntensity[i], experimentalPeakIntensity));
+                    matchesFound++;
+                }
+                else
+                {
+                    intensityPairs.Add((theoreticalIntensity[i], 0));
+                }
+            }
+            if (matchesFound == 0) throw new ArgumentException("No matches exist");
+            if (AllPeaks)
+            {
+                foreach (Node node in experimentalTree)
+                {
+                    intensityPairs.Add((0, node.Value));
                 }
             }
 
-            if (!(intensitySum > 0)) throw new ArgumentException("No paired peaks were found");
             return intensityPairs;
         }
 

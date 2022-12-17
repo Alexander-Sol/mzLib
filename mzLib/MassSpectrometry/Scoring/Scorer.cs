@@ -28,6 +28,8 @@ public class Scorer
     public ScoringAlgorithm Algorithm { get; private set; }
     public PpmTolerance Tolerance { get; }
     public double ThresholdMz { get; }
+    private bool _allPeaks;
+    public bool AllPeaks => _allPeaks;
     public double PoorScore
     {
         get
@@ -49,12 +51,14 @@ public class Scorer
     }
     private double? _poorScore;
 
-    public Scorer(ScoringScheme scoringScheme, NormalizationScheme normalization, PpmTolerance tolerance, double thresholdMz = 300)
+    public Scorer(ScoringScheme scoringScheme, NormalizationScheme normalization,
+        PpmTolerance tolerance, double thresholdMz = 300, bool allPeaks = true)
     {
         ScoreType = scoringScheme;
         Normalization = normalization;
         Tolerance = tolerance;
         ThresholdMz = thresholdMz;
+        _allPeaks = allPeaks;
         ConstructScoringAlgorithm();
     }
 
@@ -69,10 +73,10 @@ public class Scorer
             case ScoringScheme.KullbackLeibler:
                 throw new NotImplementedException();
             case ScoringScheme.SpectralContrastAngle:
-                Algorithm = new SpectralContrastAlgorithm(Tolerance);
+                Algorithm = new SpectralContrastAlgorithm(Tolerance, _allPeaks);
                 break;
             case ScoringScheme.CosineSimilarity:
-                Algorithm = new CosineSimilarityAlgorithm(Tolerance);
+                Algorithm = new CosineSimilarityAlgorithm(Tolerance, _allPeaks);
                 break;
             default:
                 throw new NotImplementedException();
@@ -172,6 +176,12 @@ public class Scorer
     public void ChangeNormalizationScheme(NormalizationScheme newScheme)
     {
         Normalization = newScheme;
+    }
+
+    public void SetAllPeaks(bool allPeaks)
+    {
+        _allPeaks = allPeaks;
+        Algorithm.AllPeaks = allPeaks;
     }
 
     /// <summary>

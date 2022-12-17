@@ -19,8 +19,11 @@ namespace Test
         public static MzSpectrum ExperimentalB;
         public static MzSpectrum TheoreticalB;
 
-        public static MzSpectrum ExperimentalC;
-        public static MzSpectrum TheoreticalC;
+        public static MzSpectrum ExperimentalC0;
+        public static MzSpectrum TheoreticalC0;
+
+        public static MzSpectrum ExperimentalC1;
+        public static MzSpectrum TheoreticalC1;
 
         public static MzSpectrum ExperimentalD;
         public static MzSpectrum TheoreticalD;
@@ -47,9 +50,13 @@ namespace Test
             ExperimentalB = new MzSpectrum(new double[] { 1, 2, 3 }, new double[] { 2, 4, 6 }, false);
             TheoreticalB = new MzSpectrum(new double[] { 1 }, new double[] { 2 }, false);
 
-            // Tolerance and FindNearest stress test
-            ExperimentalC = new MzSpectrum(new double[] { 1, 2, 3, 4 }, new double[] { 4, 3, 2, 1 }, false);
-            TheoreticalC = new MzSpectrum(new double[] { 1.000011, 1.99997, 3.000031, 3.99995 }, new double[] { 1, 2, 3, 4 }, false);
+            // Tolerance and FindNearest stress test, these peaks should not be matched at 10 ppm
+            ExperimentalC0 = new MzSpectrum(new double[] { 1, 2, 3, 4 }, new double[] { 4, 3, 2, 1 }, false);
+            TheoreticalC0 = new MzSpectrum(new double[] { 1.000011, 1.99997, 3.000031, 3.99995 }, new double[] { 1, 2, 3, 4 }, false);
+
+            // All of these should be matched at 10 ppm, they are essentially identical
+            ExperimentalC1 = ExperimentalC0;
+            TheoreticalC1 = new MzSpectrum(new double[] { 1.0000001, 1.9999997, 3.00000031, 3.99999995 }, new double[] { 4, 3, 2, 1 }, false);
 
             //What happens when no peaks overlap
             ExperimentalD = new MzSpectrum(new double[] { 1, 2, 3 }, new double[] { 2, 4, 6 }, false);
@@ -73,12 +80,13 @@ namespace Test
         {
             Scorer spectralScorer = new Scorer(Scorer.ScoringScheme.SpectralContrastAngle,
                 Scorer.NormalizationScheme.unnormalized,
-                new PpmTolerance(10), thresholdMz: 0);
+                new PpmTolerance(10), thresholdMz: 0, allPeaks: false);
 
             // Test w/o normalization
-            Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.73).Within(0.01));
+            Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.69).Within(0.01));
 
             // Test squareRootSpectrumSum normalization
+            spectralScorer.SetAllPeaks(true);
             spectralScorer.ChangeNormalizationScheme(Scorer.NormalizationScheme.squareRootSpectrumSum);
             Assert.That(spectralScorer.Score(ExperimentalA, TheoreticalA), Is.EqualTo(0.59).Within(0.01));
 
@@ -90,7 +98,10 @@ namespace Test
             Assert.That(spectralScorer.Score(ExperimentalB, TheoreticalB), Is.EqualTo(0.17).Within(0.01));
 
             // Test cases C, D, and E
-            Assert.That(spectralScorer.Score(ExperimentalC, TheoreticalC), Is.EqualTo(0.54).Within(0.01));
+            Assert.That(spectralScorer.Score(ExperimentalC0, TheoreticalC0), Is.EqualTo(0).Within(0.01));
+            
+            double tolAtOne = spectralScorer.Tolerance.GetMaximumValue(1);
+            Assert.That(spectralScorer.Score(ExperimentalC1, TheoreticalC1), Is.EqualTo(1.0).Within(0.01));
 
             Assert.That(spectralScorer.Score(ExperimentalD, TheoreticalD), Is.EqualTo(0.0).Within(0.01));
 
@@ -105,7 +116,7 @@ namespace Test
                 Scorer.NormalizationScheme.unnormalized,
                 new PpmTolerance(10), thresholdMz: 0);
 
-            // Test two empty arrays causes an exception to be thrown by the scorer
+            // Test that two empty arrays causes an exception to be thrown by the scorer
             Assert.Throws<MzLibException>(() =>
             {
                 spectralScorer.Score(EmptySpectrum, EmptySpectrum);
