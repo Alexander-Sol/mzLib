@@ -74,11 +74,13 @@ namespace FlashLFQ
                 sb.Append("Base Sequences Mapped" + "\t");
                 sb.Append("Full Sequences Mapped" + "\t");
                 sb.Append("Peak Split Valley RT" + "\t");
-                sb.Append("Peak Apex Mass Error (ppm)" + "\t");
+                sb.Append("Peak Apex Mass Error (ppm)");
                 //sb.Append("Timepoints");
-                return sb.ToString();
+                return sb.ToString().Trim();
             }
         }
+
+        public static string VerboseTabSeparatedHeader => TabSeparatedHeader + "\tIsotope Peaks" + "\tIsotope Peak RTs";
 
         /// <summary>
         /// Sets retention time information for a given peak. Used for MBR peaks
@@ -161,7 +163,7 @@ namespace FlashLFQ
             this.NumIdentificationsByBaseSeq = Identifications.Select(v => v.BaseSequence).Distinct().Count();
             this.NumIdentificationsByFullSeq = Identifications.Select(v => v.ModifiedSequence).Distinct().Count();
         }
-
+        
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
@@ -232,6 +234,99 @@ namespace FlashLFQ
             sb.Append("" + MassError);
             
             return sb.ToString();
+        }
+
+        public string ToString(bool verbose)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append(SpectraFileInfo.FilenameWithoutExtension + "\t");
+            sb.Append(string.Join("|", Identifications.Select(p => p.BaseSequence).Distinct()) + '\t');
+            sb.Append(string.Join("|", Identifications.Select(p => p.ModifiedSequence).Distinct()) + '\t');
+
+            var proteinGroups = Identifications
+                .SelectMany(p => p.ProteinGroups.Select(v => v.ProteinGroupName))
+                .Distinct()
+                .OrderBy(p => p);
+            if (proteinGroups.Any())
+            {
+                sb.Append(string.Join(";", proteinGroups) + '\t');
+            }
+            else
+            {
+                sb.Append("" + '\t');
+            }
+
+            sb.Append("" + Identifications.First().MonoisotopicMass + '\t');
+            if (!IsMbrPeak)
+            {
+                sb.Append("" + Identifications.First().Ms2RetentionTimeInMinutes + '\t');
+            }
+            else
+            {
+                sb.Append("" + '\t');
+            }
+
+            sb.Append("" + Identifications.First().PrecursorChargeState + '\t');
+            sb.Append("" + ClassExtensions.ToMz(Identifications.First().MonoisotopicMass, Identifications.First().PrecursorChargeState) + '\t');
+            sb.Append("" + Intensity + "\t");
+
+            if (Apex != null)
+            {
+                sb.Append("" + IsotopicEnvelopes.Min(p => p.IndexedPeak.RetentionTime) + "\t");
+                sb.Append("" + Apex.IndexedPeak.RetentionTime + "\t");
+                sb.Append("" + IsotopicEnvelopes.Max(p => p.IndexedPeak.RetentionTime) + "\t");
+
+                sb.Append("" + Apex.IndexedPeak.Mz + "\t");
+                sb.Append("" + Apex.ChargeState + "\t");
+            }
+            else
+            {
+                sb.Append("" + "-" + "\t");
+                sb.Append("" + "-" + "\t");
+                sb.Append("" + "-" + "\t");
+
+                sb.Append("" + "-" + "\t");
+                sb.Append("" + "-" + "\t");
+            }
+
+            sb.Append("" + NumChargeStatesObserved + "\t");
+
+            if (IsMbrPeak)
+            {
+                sb.Append("" + "MBR" + "\t");
+            }
+            else
+            {
+                sb.Append("" + "MSMS" + "\t");
+            }
+
+            sb.Append("" + (IsMbrPeak ? MbrScore.ToString() : "") + "\t");
+
+            sb.Append("" + Identifications.Count + "\t");
+            sb.Append("" + NumIdentificationsByBaseSeq + "\t");
+            sb.Append("" + NumIdentificationsByFullSeq + "\t");
+            sb.Append("" + SplitRT + "\t");
+            sb.Append("" + MassError + "\t");
+
+            sb.Append(GetIsotopeInformation());
+
+            return sb.ToString();
+        }
+
+        internal string GetIsotopeInformation()
+        {
+            var verboseEnvelopes = IsotopicEnvelopes.Select(e => e as VerboseIsotopicEnvelope).ToList();
+            int numberOfScans = verboseEnvelopes.Count();
+            Dictionary<string, double[]> ionIntensities = new();
+            for (int i = 0; i < numberOfScans; i++)
+            {
+                foreach (var peak in verboseEnvelopes[i].AllPeaks)
+                {
+                    string peakName = peak.
+                }
+            }
+
+            return "\t";
         }
     }
 }

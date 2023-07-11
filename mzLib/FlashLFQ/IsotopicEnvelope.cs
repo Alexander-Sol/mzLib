@@ -11,9 +11,9 @@
         public readonly IndexedMassSpectralPeak IndexedPeak;
         public readonly int ChargeState;
 
-        public IsotopicEnvelope(IndexedMassSpectralPeak monoisotopicPeak, int chargeState, double intensity)
+        public IsotopicEnvelope(IndexedMassSpectralPeak mostAbundantPeak, int chargeState, double intensity)
         {
-            IndexedPeak = monoisotopicPeak;
+            IndexedPeak = mostAbundantPeak;
             ChargeState = chargeState;
             Intensity = intensity / chargeState;
         }
