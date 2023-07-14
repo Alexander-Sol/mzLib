@@ -15,6 +15,7 @@ using Test.FileReadingTests;
 using UsefulProteomicsDatabases;
 using ChromatographicPeak = FlashLFQ.ChromatographicPeak;
 using Stopwatch = System.Diagnostics.Stopwatch;
+using System.Windows.Controls;
 
 namespace Test
 {
@@ -473,7 +474,7 @@ namespace Test
                 new Proteomics.AminoAcidPolymer.Peptide(peptide).MonoisotopicMass, 1.7 + 0.001, 1, new List<ProteinGroup> { pg });
 
             // create the FlashLFQ engine
-            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 });
+            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 }, verboseOutput: false);
 
             // run the engine
             var results = engine.Run();
@@ -527,7 +528,7 @@ namespace Test
                 new Proteomics.AminoAcidPolymer.Peptide(peptide).MonoisotopicMass, 1.3 + 0.001, 1, new List<ProteinGroup> { pg });
 
             // create the FlashLFQ engine
-            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 });
+            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 }, verboseOutput: false);
 
             // run the engine
             var results = engine.Run();
@@ -587,7 +588,7 @@ namespace Test
                 new Proteomics.AminoAcidPolymer.Peptide(peptide).MonoisotopicMass, 1.3 + 0.001, 1, new List<ProteinGroup> { pg });
 
             // create the FlashLFQ engine
-            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 });
+            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 }, verboseOutput: false);
 
             // run the engine
             var results = engine.Run();
@@ -647,7 +648,7 @@ namespace Test
                 new Proteomics.AminoAcidPolymer.Peptide(peptide).MonoisotopicMass, 1.3 + 0.001, 1, new List<ProteinGroup> { pg });
 
             // create the FlashLFQ engine
-            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 });
+            FlashLfqEngine engine = new FlashLfqEngine(new List<Identification> { id1 }, verboseOutput: false);
 
             // run the engine
             var results = engine.Run();
@@ -1143,8 +1144,9 @@ namespace Test
                 ids.Add(id);
             }
 
-            var engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: false, maxThreads: 1);
+            var engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: false, maxThreads: 1, verboseOutput: true);
             var results = engine.Run();
+            results.WriteResults(Path.Combine(TestContext.CurrentContext.TestDirectory, "VerbosePeaks.tsv"), null, null, null, true);
 
             var f1r1MbrResults = results
                 .PeptideModifiedSequences

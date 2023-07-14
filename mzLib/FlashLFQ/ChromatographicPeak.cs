@@ -1,4 +1,6 @@
 ﻿using Chemistry;
+using Easy.Common.Extensions;
+using MathNet.Numerics;
 using MathNet.Numerics.Statistics;
 using System;
 using System.Collections.Generic;
@@ -80,7 +82,10 @@ namespace FlashLFQ
             }
         }
 
-        public static string VerboseTabSeparatedHeader => TabSeparatedHeader + "\tIsotope Peaks" + "\tIsotope Peak RTs";
+        public static string VerboseTabSeparatedHeader => TabSeparatedHeader 
+            + "\tIsotope Peak Intensity"
+            + "\tIsotope Peak m/z" 
+            + "\tIsotope Peak RTs";
 
         /// <summary>
         /// Sets retention time information for a given peak. Used for MBR peaks
@@ -308,25 +313,89 @@ namespace FlashLFQ
             sb.Append("" + SplitRT + "\t");
             sb.Append("" + MassError + "\t");
 
-            sb.Append(GetIsotopeInformation());
+            if(verbose)
+                sb.Append(GetIsotopeInformation());
 
-            return sb.ToString();
+            return sb.ToString().Trim();
         }
 
+        /// <summary>
+        /// Returns the 
+        /// </summary>
+        /// <returns></returns>
         internal string GetIsotopeInformation()
         {
-            var verboseEnvelopes = IsotopicEnvelopes.Select(e => e as VerboseIsotopicEnvelope).ToList();
-            int numberOfScans = verboseEnvelopes.Count();
-            Dictionary<string, double[]> ionIntensities = new();
-            for (int i = 0; i < numberOfScans; i++)
+            var verboseEnvelopes = IsotopicEnvelopes
+                .Select(e => e as VerboseIsotopicEnvelope)
+                .Where(e => e != null)
+                .OrderBy(e => e.IndexedPeak.RetentionTime)
+                .ToList();
+
+            if (!verboseEnvelopes.IsNotNullOrEmpty())
+                return "\t\t\t";
+
+            var timePoints = verboseEnvelopes
+                .OrderBy(e => e.ChargeState)
+                .GroupBy(e => e.RetentionTime)
+                .OrderBy(group => group.Key)
+                .ToList();
+                
+            // Maps isotope count ( 0 = monoisotopic) + charge to an array of peaks,
+            // each array index maps to one IsotopicEnvelope representing a distinct
+            // point in time
+            Dictionary<(int isotope, int z), IndexedMassSpectralPeak[]> allPeaksDict = new();
+
+            for(int i =0; i < timePoints.Count; i++)
             {
-                foreach (var peak in verboseEnvelopes[i].AllPeaks)
+                foreach(var envelope in timePoints[i])
                 {
-                    string peakName = peak.
+                    foreach(var kvp in envelope.PeakDictionary)
+                    {
+                        (int isotope, int z) key = (kvp.Key, envelope.ChargeState);
+                        if (allPeaksDict.ContainsKey(key))
+                        {
+                            allPeaksDict[key][i] = kvp.Value;
+                        }
+                        else
+                        {
+                            allPeaksDict.Add(key, new IndexedMassSpectralPeak[timePoints.Count]);
+                            allPeaksDict[key][i] = kvp.Value;
+                        }
+                    }
                 }
             }
 
-            return "\t";
+            var allPeaksOrderedKvps = allPeaksDict
+                .OrderBy(kvp => kvp.Key.z)
+                .ThenBy(kvp => kvp.Key.isotope)
+                .ToList();
+
+            StringBuilder intensity = new();
+            StringBuilder mz = new();
+
+            foreach(var kvp in allPeaksOrderedKvps)
+            {
+                intensity.Append(
+                    "[" +
+                    VerboseIsotopicEnvelope.GetIsotopePeakName(kvp.Key)
+                    + ": "
+                    + string.Join(", ", kvp.Value.Select(imsPeak => imsPeak == null ? "-" : imsPeak.Intensity.ToString()))
+                    + "];");
+                mz.Append(
+                    "[" +
+                    VerboseIsotopicEnvelope.GetIsotopePeakName(kvp.Key)
+                    + ": "
+                    + string.Join(", ", kvp.Value.Select(imsPeak => imsPeak == null ? "-" : imsPeak.Mz.ToString()))
+                    + "];");
+            }
+
+            string distinctRetentionTimes = "[" + string.Join(", ", timePoints.Select(group => group.First().RetentionTime)) + "]";
+
+            return '\"' + intensity.ToString().Trim(';').Trim() + '\"' + '\t' 
+                 + '\"' + mz.ToString().Trim(';').Trim() + '\"' + '\t' 
+                 + distinctRetentionTimes + '\t';
         }
+
+
     }
 }

@@ -13,8 +13,9 @@ namespace FlashLFQ
         public readonly Dictionary<string, Peptide> PeptideModifiedSequences;
         public readonly Dictionary<string, ProteinGroup> ProteinGroups;
         public readonly Dictionary<SpectraFileInfo, List<ChromatographicPeak>> Peaks;
+        public readonly bool VerboseOutput;
 
-        public FlashLfqResults(List<SpectraFileInfo> spectraFiles, List<Identification> identifications)
+        public FlashLfqResults(List<SpectraFileInfo> spectraFiles, List<Identification> identifications, bool verboseOutput = false)
         {
             SpectraFiles = spectraFiles;
             PeptideModifiedSequences = new Dictionary<string, Peptide>();
@@ -48,6 +49,7 @@ namespace FlashLFQ
                     }
                 }
             }
+            VerboseOutput = verboseOutput;
         }
 
         public void MergeResultsWith(FlashLfqResults mergeFrom)
@@ -550,13 +552,16 @@ namespace FlashLFQ
             {
                 using (StreamWriter output = new StreamWriter(peaksOutputPath))
                 {
-                    output.WriteLine(ChromatographicPeak.TabSeparatedHeader);
+                    if (VerboseOutput)
+                        output.WriteLine(ChromatographicPeak.VerboseTabSeparatedHeader);
+                    else
+                        output.WriteLine(ChromatographicPeak.TabSeparatedHeader);
 
                     foreach (var peak in Peaks.SelectMany(p => p.Value)
                         .OrderBy(p => p.SpectraFileInfo.FilenameWithoutExtension)
                         .ThenByDescending(p => p.Intensity))
                     {
-                        output.WriteLine(peak.ToString());
+                        output.WriteLine(peak.ToString(verbose: VerboseOutput));
                     }
                 }
             }
