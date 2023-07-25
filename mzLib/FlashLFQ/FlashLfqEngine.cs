@@ -29,6 +29,8 @@ namespace FlashLFQ
         public readonly bool Normalize;
         public readonly double DiscriminationFactorToCutPeak;
         public readonly bool QuantifyAmbiguousPeptides;
+        public readonly bool CutPeaks;
+        public readonly bool VerboseOutput;
 
         // MBR settings
         public readonly bool MatchBetweenRuns;
@@ -63,7 +65,7 @@ namespace FlashLFQ
         private FlashLfqResults _results;
         private Dictionary<SpectraFileInfo, Ms1ScanInfo[]> _ms1Scans;
         private PeakIndexingEngine _peakIndexingEngine;
-        private bool _verboseOutput;
+        
 
         public FlashLfqEngine(
             List<Identification> allIdentifications,
@@ -92,7 +94,8 @@ namespace FlashLFQ
             int mcmcBurninSteps = 1000,
             bool useSharedPeptidesForProteinQuant = false,
             bool pairedSamples = false,
-            int? randomSeed = null)
+            int? randomSeed = null,
+            bool cutPeaks = true)
         {
             Loaders.LoadElements();
 
@@ -115,7 +118,7 @@ namespace FlashLFQ
             NumIsotopesRequired = numIsotopesRequired;
             QuantifyAmbiguousPeptides = quantifyAmbiguousPeptides;
             Silent = silent;
-            _verboseOutput = verboseOutput;
+            VerboseOutput = verboseOutput;
             IdSpecificChargeState = idSpecificChargeState;
             MbrRtWindow = maxMbrWindow;
             RequireMsmsIdInCondition = requireMsmsIdInCondition;
@@ -143,13 +146,14 @@ namespace FlashLFQ
             PeakfindingPpmTolerance = 20.0;
             MissedScansAllowed = 1;
             DiscriminationFactorToCutPeak = 0.6;
+            CutPeaks = cutPeaks;
         }
 
         public FlashLfqResults Run()
         {
             _globalStopwatch.Start();
             _ms1Scans = new Dictionary<SpectraFileInfo, Ms1ScanInfo[]>();
-            _results = new FlashLfqResults(_spectraFileInfo, _allIdentifications, _verboseOutput);
+            _results = new FlashLfqResults(_spectraFileInfo, _allIdentifications, VerboseOutput);
 
             // build m/z index keys
             CalculateTheoreticalIsotopeDistributions();
@@ -446,7 +450,7 @@ namespace FlashLFQ
                         }
 
                         msmsFeature.CalculateIntensityForThisFeature(Integrate);
-                        if(!_verboseOutput)
+                        if(CutPeaks)
                             CutPeak(msmsFeature, identification.Ms2RetentionTimeInMinutes);
 
                         if (!msmsFeature.IsotopicEnvelopes.Any())
@@ -796,7 +800,8 @@ namespace FlashLFQ
                                     acceptorPeak.CalculateIntensityForThisFeature(Integrate);
                                     acceptorPeak.SetRtWindow(acceptorFileRtHypothesis, rtStdDev, rtInterquartileRange);
 
-                                    CutPeak(acceptorPeak, seedEnv.IndexedPeak.RetentionTime);
+                                    if (CutPeaks)
+                                        CutPeak(acceptorPeak, seedEnv.IndexedPeak.RetentionTime);
 
                                     var claimedPeaks = new HashSet<IndexedMassSpectralPeak>(acceptorPeak.IsotopicEnvelopes.Select(p => p.IndexedPeak));
                                     claimedPeaks.Add(seedEnv.IndexedPeak); // prevents infinite loops
@@ -1199,7 +1204,7 @@ namespace FlashLFQ
                         }
                     }
 
-                    IsotopicEnvelope newEnvelope = _verboseOutput
+                    IsotopicEnvelope newEnvelope = VerboseOutput
                         ? new VerboseIsotopicEnvelope(peak, imsPeaks, chargeState, identification.MonoisotopicMass)
                         : new IsotopicEnvelope(peak, chargeState, experimentalIsotopeIntensities.Sum());
 

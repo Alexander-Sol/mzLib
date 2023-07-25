@@ -17,6 +17,10 @@ namespace FlashLFQ
         public double SplitRT;
         public readonly bool IsMbrPeak;
         public double MbrScore;
+        public static string IntensityKey => "Isotope Peak Intensities";
+        public static string MzKey => "Isotope Peak m/zs";
+        public static string RtKey => "Isotope Peak RTs";
+
 
         public ChromatographicPeak(Identification id, bool isMbrPeak, SpectraFileInfo fileInfo)
         {
@@ -320,9 +324,100 @@ namespace FlashLFQ
         }
 
         /// <summary>
-        /// Returns the 
+        /// Returns a dictionary with three keys: "Isotope Peak Intensities", "Isotope Peak m/zs", "Isotope Peak RTs".
+        /// m/z and Intensity entries are both strings containing the m/z or intensitiy, respectively, for every isotopic
+        /// peak for every sequential MS1 in the chromatographic peak. Each isotope is labeled with the following format:
+        /// iXzY, where X represent the number of C13/N15 atoms present in the peptide (e.g., 0 is monoisotopic, 1 is +1),
+        /// and Y represents the charge state. A colon separates isotope labels and their associated comma-separated list of values.
+        /// Each isotope is contained within brackets and isotopes are separated from one another with semi-colons.
         /// </summary>
-        /// <returns></returns>
+        /// <returns> Dictionary where values take the following format [i0z1: 1, 2, 1]; [i1z1: -, 1, -] </returns>
+        public static Dictionary<string, string> GetIsotopeInformation(ChromatographicPeak peak)
+        {
+            Dictionary<string, string> isotopeInfo = new Dictionary<string, string>
+            {
+                { IntensityKey, null },
+                { MzKey, null },
+                { RtKey, null },
+            };
+
+            if (peak == null)
+                return isotopeInfo;
+
+            var verboseEnvelopes = peak.IsotopicEnvelopes
+                .Select(e => e as VerboseIsotopicEnvelope)
+                .Where(e => e != null)
+                .OrderBy(e => e.IndexedPeak.RetentionTime)
+                .ToList();
+
+            if (!verboseEnvelopes.IsNotNullOrEmpty())
+                return isotopeInfo;
+
+            var timePoints = verboseEnvelopes
+                .OrderBy(e => e.ChargeState)
+                .GroupBy(e => e.RetentionTime)
+                .OrderBy(group => group.Key)
+                .ToList();
+
+            // Maps isotope count ( 0 = monoisotopic) + charge to an array of peaks,
+            // each array index maps to one IsotopicEnvelope representing a distinct
+            // point in time
+            Dictionary<(int isotope, int z), IndexedMassSpectralPeak[]> allPeaksDict = new();
+
+            for (int i = 0; i < timePoints.Count; i++)
+            {
+                foreach (var envelope in timePoints[i])
+                {
+                    foreach (var kvp in envelope.PeakDictionary)
+                    {
+                        (int isotope, int z) key = (kvp.Key, envelope.ChargeState);
+                        if (allPeaksDict.ContainsKey(key))
+                        {
+                            allPeaksDict[key][i] = kvp.Value;
+                        }
+                        else
+                        {
+                            allPeaksDict.Add(key, new IndexedMassSpectralPeak[timePoints.Count]);
+                            allPeaksDict[key][i] = kvp.Value;
+                        }
+                    }
+                }
+            }
+
+            var allPeaksOrderedKvps = allPeaksDict
+                .OrderBy(kvp => kvp.Key.z)
+                .ThenBy(kvp => kvp.Key.isotope)
+                .ToList();
+
+            StringBuilder intensity = new();
+            StringBuilder mz = new();
+
+            foreach (var kvp in allPeaksOrderedKvps)
+            {
+                intensity.Append(
+                    "[" +
+                    VerboseIsotopicEnvelope.GetIsotopePeakName(kvp.Key)
+                    + ": "
+                    + string.Join(", ", kvp.Value.Select(imsPeak => imsPeak == null ? "-" : imsPeak.Intensity.ToString()))
+                    + "];");
+                mz.Append(
+                    "[" +
+                    VerboseIsotopicEnvelope.GetIsotopePeakName(kvp.Key)
+                    + ": "
+                    + string.Join(", ", kvp.Value.Select(imsPeak => imsPeak == null ? "-" : imsPeak.Mz.ToString()))
+                    + "];");
+            }
+
+            string distinctRetentionTimes = "[" + string.Join(", ", timePoints.Select(group => group.First().RetentionTime)) + "]";
+
+            isotopeInfo[IntensityKey] = intensity.ToString().Trim(';').Trim();
+            isotopeInfo[MzKey] = mz.ToString().Trim(';').Trim();
+            isotopeInfo[RtKey] = distinctRetentionTimes;
+
+            return isotopeInfo;
+        }
+
+        
         internal string GetIsotopeInformation()
         {
             var verboseEnvelopes = IsotopicEnvelopes
@@ -391,8 +486,8 @@ namespace FlashLFQ
 
             string distinctRetentionTimes = "[" + string.Join(", ", timePoints.Select(group => group.First().RetentionTime)) + "]";
 
-            return '\"' + intensity.ToString().Trim(';').Trim() + '\"' + '\t' 
-                 + '\"' + mz.ToString().Trim(';').Trim() + '\"' + '\t' 
+            return intensity.ToString().Trim(';').Trim() + '\t' 
+                 + mz.ToString().Trim(';').Trim() + '\t' 
                  + distinctRetentionTimes + '\t';
         }
 

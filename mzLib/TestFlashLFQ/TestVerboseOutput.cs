@@ -137,7 +137,7 @@ namespace TestFlashLFQ
 
             string[] toStringArray = chromPeak.ToString(verbose: true).Split('\t');
             var intensityCell = toStringArray[22];
-            StringAssert.Contains("i0z1: 1\r\ni1z1: 2", intensityCell);
+            StringAssert.Contains("[i0z1: 1];[i1z1: 2]", intensityCell);
 
             // Add a second envelope with a different charge state
             var envelope2 = new VerboseIsotopicEnvelope(
@@ -148,7 +148,7 @@ namespace TestFlashLFQ
                 isotopePpmTolerance: 5);
             chromPeak.IsotopicEnvelopes = new List<FlashLFQ.IsotopicEnvelope> { envelope1, envelope2 };
             intensityCell = chromPeak.ToString(verbose: true).Split('\t')[22];
-            StringAssert.Contains("i4z1: 5\r\ni0z2: 1\r\ni1z2: 2", intensityCell);
+            StringAssert.Contains("[i4z1: 5];[i0z2: 1];[i1z2: 2]", intensityCell);
 
             // Add a third envelope with charge of 2 and retention time of 2
             IndexedMassSpectralPeak peak1time2 = new IndexedMassSpectralPeak(mz: 1 + 0 * Constants.C13MinusC12, 1, -1, 2);
@@ -167,8 +167,12 @@ namespace TestFlashLFQ
             chromPeak.IsotopicEnvelopes = new List<FlashLFQ.IsotopicEnvelope> { envelope1, envelope2, envelope2time2 };
             intensityCell = chromPeak.ToString(verbose: true).Split('\t')[22];
             var timeCell = chromPeak.ToString(verbose: true).Split('\t')[24];
-            StringAssert.Contains("i4z1: 5, -\r\ni0z2: 1, 1\r\ni1z2: 2, 2", intensityCell);
+            StringAssert.Contains("[i4z1: 5, -];[i0z2: 1, 1];[i1z2: 2, 2]", intensityCell);
             StringAssert.Contains("1, 2", timeCell);
+
+            var isotopeDict = ChromatographicPeak.GetIsotopeInformation(chromPeak);
+            Assert.AreEqual(intensityCell, isotopeDict["Isotope Peak Intensities"]);
+            Assert.AreEqual(timeCell, isotopeDict[ChromatographicPeak.RtKey]);
         }
 
         public static void SetChromatographicPeakProperties(this ChromatographicPeak peak, string propName, Object newValue)
