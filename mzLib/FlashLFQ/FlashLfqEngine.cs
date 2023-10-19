@@ -598,7 +598,9 @@ namespace FlashLFQ
                     {
                         if (acceptorFileBestMsmsPeaks.TryGetValue(acceptorPeak.Identifications.First().ModifiedSequence, out ChromatographicPeak currentBestPeak))
                         {
-                            if (currentBestPeak.Intensity > acceptorPeak.Intensity)
+                            // This if statement was originally reversed. i.e., the dictionary peak was only replaced if the acceptor
+                            // peak intensity was less than the intensity of the current best peak. This appears to be a bug
+                            if (currentBestPeak.Intensity < acceptorPeak.Intensity)
                             {
                                 acceptorFileBestMsmsPeaks[acceptorPeak.Identifications.First().ModifiedSequence] = acceptorPeak;
                             }
@@ -732,6 +734,8 @@ namespace FlashLFQ
 
                             rtRange = Math.Min(rtRange, MbrRtWindow);
 
+                            // TODO: Add a toggle that set rtRange to be maximum width
+
                             // this is the RT in the acceptor file to look around to find this analyte
                             double acceptorFileRtHypothesis = donorPeak.Apex.IndexedPeak.RetentionTime + median;
                             double lowerRangeRtHypothesis = acceptorFileRtHypothesis - (rtRange / 2.0);
@@ -766,13 +770,15 @@ namespace FlashLFQ
                                 chargesToMatch.Add(donorPeak.Apex.ChargeState);
                             }
 
+                            // TODO: For decoys, need to increase ppm tolerance until something is found or a maximum is reached
                             foreach (int z in chargesToMatch)
                             {
                                 List<IndexedMassSpectralPeak> chargeXic = new List<IndexedMassSpectralPeak>();
 
                                 for (int j = start.ZeroBasedMs1ScanIndex; j <= end.ZeroBasedMs1ScanIndex; j++)
                                 {
-                                    IndexedMassSpectralPeak peak = _peakIndexingEngine.GetIndexedPeak(donorIdentification.PeakfindingMass, j, mbrTol, z);
+                                    IndexedMassSpectralPeak peak = _peakIndexingEngine.GetIndexedPeak(donorIdentification.PeakfindingMass,
+                                        j, mbrTol, z);
 
                                     if (peak != null)
                                     {
@@ -794,7 +800,8 @@ namespace FlashLFQ
                                     var acceptorPeak = new ChromatographicPeak(donorIdentification, true, idAcceptorFile);
                                     IsotopicEnvelope seedEnv = chargeEnvelopes.First();
 
-                                    var xic = Peakfind(seedEnv.IndexedPeak.RetentionTime, donorIdentification.PeakfindingMass, z, idAcceptorFile, mbrTol);
+                                    var xic = Peakfind(seedEnv.IndexedPeak.RetentionTime,
+                                        donorIdentification.PeakfindingMass, z, idAcceptorFile, mbrTol);
                                     List<IsotopicEnvelope> bestChargeEnvelopes = GetIsotopicEnvelopes(xic, donorIdentification, z);
                                     acceptorPeak.IsotopicEnvelopes.AddRange(bestChargeEnvelopes);
                                     acceptorPeak.CalculateIntensityForThisFeature(Integrate);
