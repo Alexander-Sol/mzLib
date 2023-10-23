@@ -743,98 +743,9 @@ namespace FlashLFQ
 
                         for (int i = range.Item1; i < range.Item2; i++)
                         {
-                            nearbyCalibrationPoints.Clear();
-
-                            // only compare +- 1 fraction
-                            if (acceptorSampleIsFractionated && donorSampleIsFractionated)
-                            {
-                                int acceptorFractionNumber = idAcceptorFile.Fraction;
-                                int donorFractionNumber = idDonorFile.Fraction;
-
-                                if (Math.Abs(acceptorFractionNumber - donorFractionNumber) > 1)
-                                {
-                                    continue;
-                                }
-                            }
-
                             ChromatographicPeak donorPeak = idDonorPeaks[i];
-                            Identification donorIdentification = donorPeak.Identifications.OrderBy(p => p.PosteriorErrorProbability).First();
-
-                            // binary search for this donor peak in the retention time calibration spline
-                            RetentionTimeCalibDataPoint testPoint = new RetentionTimeCalibDataPoint(donorPeak, null);
-                            int index = Array.BinarySearch(rtCalibrationCurve, testPoint);
-
-                            if (index < 0)
-                            {
-                                index = ~index;
-                            }
-                            if (index >= rtCalibrationCurve.Length && index >= 1)
-                            {
-                                index = rtCalibrationCurve.Length - 1;
-                            }
-
-                            // gather nearby data points
-                            for (int r = index; r < rtCalibrationCurve.Length; r++)
-                            {
-                                double rtDiff = rtCalibrationCurve[r].DonorFilePeak.Apex.IndexedPeak.RetentionTime - donorPeak.Apex.IndexedPeak.RetentionTime;
-
-                                if (Math.Abs(rtDiff) < 0.5)
-                                {
-                                    nearbyCalibrationPoints.Add(rtCalibrationCurve[r]);
-                                }
-                                else
-                                {
-                                    break;
-                                }
-                            }
-
-                            for (int r = index - 1; r >= 0; r--)
-                            {
-                                double rtDiff = rtCalibrationCurve[r].DonorFilePeak.Apex.IndexedPeak.RetentionTime - donorPeak.Apex.IndexedPeak.RetentionTime;
-
-                                if (Math.Abs(rtDiff) < 0.5)
-                                {
-                                    nearbyCalibrationPoints.Add(rtCalibrationCurve[r]);
-                                }
-                                else
-                                {
-                                    break;
-                                }
-                            }
-
-                            if (!nearbyCalibrationPoints.Any())
-                            {
-                                continue;
-                            }
-
-                            // calculate difference between acceptor and donor RTs for these RT region
-                            List<double> rtDiffs = nearbyCalibrationPoints
-                                .Select(p => p.AcceptorFilePeak.Apex.IndexedPeak.RetentionTime - p.DonorFilePeak.Apex.IndexedPeak.RetentionTime)
-                                .ToList();
-
-                            // figure out the range of RT differences between the files that are "reasonable", centered around the median difference
-                            double median = rtDiffs.Median();
-
-                            // default range (if only 1 datapoint, or SD is 0, range is very high, etc)
-                            double rtRange = MbrRtWindow;
-                            double? rtStdDev = null;
-                            double? rtInterquartileRange = null;
-
-                            if (nearbyCalibrationPoints.Count < 6 && nearbyCalibrationPoints.Count > 1 && rtDiffs.StandardDeviation() > 0)
-                            {
-                                rtStdDev = rtDiffs.StandardDeviation();
-                                rtRange = (double)rtStdDev * 6.0; // Multiplication inherited from legacy code, unsure of reason for 6
-                            }
-                            else if (nearbyCalibrationPoints.Count >= 6 && rtDiffs.InterquartileRange() > 0)
-                            {
-                                rtInterquartileRange = rtDiffs.InterquartileRange();
-                                rtRange = (double)rtInterquartileRange * 4.5; // Multiplication inherited from legacy code, unsure of reason for 4.5
-                            }
-
-                            rtRange = Math.Min(rtRange, MbrRtWindow);
-
                             // TODO: Add a toggle that set rtRange to be maximum width
-                            var predictionResults = PredictRetentionTime(rtCalibrationCurve, idDonorPeaks[i], idDonorFile, idAcceptorFile, acceptorSampleIsFractionated, donorSampleIsFractionated);
+                            var predictionResults = PredictRetentionTime(rtCalibrationCurve, donorPeak, idDonorFile, idAcceptorFile, acceptorSampleIsFractionated, donorSampleIsFractionated);
                             if (predictionResults == null) continue;
                             (double predictedRt, double range, double? rtSd, double? rtInterquartileRange) rtInfo = ((double, double, double?, double?))predictionResults;
                             
@@ -872,6 +783,8 @@ namespace FlashLFQ
                                 chargesToMatch.Add(donorPeak.Apex.ChargeState);
                             }
 
+                            Identification donorIdentification = donorPeak.Identifications.OrderBy(p => p.PosteriorErrorProbability).First();
+
                             // TODO: For decoys, need to increase ppm tolerance until something is found or a maximum is reached
                             foreach (int z in chargesToMatch)
                             {
@@ -907,7 +820,7 @@ namespace FlashLFQ
                                     List<IsotopicEnvelope> bestChargeEnvelopes = GetIsotopicEnvelopes(xic, donorIdentification, z);
                                     acceptorPeak.IsotopicEnvelopes.AddRange(bestChargeEnvelopes);
                                     acceptorPeak.CalculateIntensityForThisFeature(Integrate);
-                                    acceptorPeak.SetRtWindow(acceptorFileRtHypothesis, rtStdDev, rtInterquartileRange);
+                                    acceptorPeak.SetRtWindow(acceptorFileRtHypothesis, rtInfo.rtSd, rtInfo.rtInterquartileRange);
 
                                     if (CutPeaks)
                                         CutPeak(acceptorPeak, seedEnv.IndexedPeak.RetentionTime);
