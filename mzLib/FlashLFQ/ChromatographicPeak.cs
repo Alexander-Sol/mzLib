@@ -17,7 +17,7 @@ namespace FlashLFQ
         public double SplitRT;
         public readonly bool IsMbrPeak;
         public double MbrScore;
-        public double EnvelopeScore { get; set; }
+        public double? EnvelopeScore { get; set; }
         public static string IntensityKey => "Isotope Peak Intensities";
         public static string MzKey => "Isotope Peak m/zs";
         public static string RtKey => "Isotope Peak RTs";

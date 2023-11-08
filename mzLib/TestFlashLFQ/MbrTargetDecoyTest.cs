@@ -48,7 +48,7 @@ namespace Test
             ProteinGroup pg = new ProteinGroup("xyz", "x", "z");
             List<ProteinGroup> pgs = new List<ProteinGroup> { pg };
             SpectraFileInfo j5 = new SpectraFileInfo(spectraFilePath, "A", 1, 1, 1);
-            double rtRange = 4.0;
+            double rtRange = 10.0;
             double maxPeaksToReport = 750;
 
             List<Identification> decoys = new();
@@ -123,13 +123,13 @@ namespace Test
                                     .ToArray();
                                 double[] isotopeIntensitySums = new double[isotopeNumbers.Length];
                                 int envelopesAveraged = 1;
-                                for(int j = 0; j > isotopeNumbers.Length; j++)
+                                for(int j = 0; j < isotopeNumbers.Length; j++)
                                 {
                                     isotopeIntensitySums[j] = envelopes[i].PeakDictionary[isotopeNumbers[j]].Intensity;
                                 }
                                 if(i + 1 < envelopes.Count)
                                 {
-                                    for (int j = 0; j > isotopeNumbers.Length; j++)
+                                    for (int j = 0; j < isotopeNumbers.Length; j++)
                                     {
                                         if(envelopes[i + 1].PeakDictionary.TryGetValue(isotopeNumbers[j], out var imsPeak))
                                             isotopeIntensitySums[j] += imsPeak.Intensity;
@@ -138,20 +138,35 @@ namespace Test
                                 }
                                 if (i - 1 >= 0)
                                 {
-                                    for (int j = 0; j > isotopeNumbers.Length; j++)
+                                    for (int j = 0; j < isotopeNumbers.Length; j++)
                                     {
-                                        if (envelopes[i + 1].PeakDictionary.TryGetValue(isotopeNumbers[j], out var imsPeak))
+                                        if (envelopes[i - 1].PeakDictionary.TryGetValue(isotopeNumbers[j], out var imsPeak))
                                             isotopeIntensitySums[j] += imsPeak.Intensity;
                                     }
                                     envelopesAveraged++;
                                 }
 
-                                for (int j = 0; j > isotopeNumbers.Length; j++)
+                                double maxIntensity = isotopeIntensitySums.Max();
+                                for (int j = 0; j < isotopeNumbers.Length; j++)
                                 {
-                                    isotopeIntensitySums[j] = isotopeIntensitySums[j] / envelopesAveraged;
+                                    isotopeIntensitySums[j] = isotopeIntensitySums[j] / maxIntensity;
                                 }
+
+                                var theoreticalIsotopeRatios = engine
+                                    ._modifiedSequenceToIsotopicDistribution[decoy.ModifiedSequence]
+                                    .OrderBy(tuple => tuple.massShift);
+                                double[] theoreticalAbundance = new double[isotopeIntensitySums.Length];
+                                foreach (var shiftRatioPair in theoreticalIsotopeRatios)
+                                {
+                                    int isotope = (int)Math.Round(shiftRatioPair.massShift);
+                                    int isotopeIndex = isotopeNumbers.IndexOf(isotope);
+                                    if (isotopeIndex < 0) continue;
+                                    theoreticalAbundance[isotopeIndex] = shiftRatioPair.normalizedAbundance;
+                                }
+                                foundPeak.EnvelopeScore = CosineSimilarity(isotopeIntensitySums, theoreticalAbundance);
+                                break;
                             }
-                        }
+                        }  
                     }
                     
                     decoyPeaks.Add(foundPeak);
@@ -181,10 +196,10 @@ namespace Test
             //int rtColumn = 24;
 
             //For Chronologer Predicted File
-            string targetPeptidePath = @"C:\Users\Alex\Source\Repos\chronologer\chronologer-main(noChange)\Unhealthy_CH2_J5_Aligned.tsv";
+            string targetPeptidePath = @"c:\users\alex\source\repos\chronologer\chronologer-main(nochange)\unhealthy_ch2_j5_aligned.tsv";
             int fullSeqCol = 2;
             int rtColumn = 7;
-            
+
             List<Identification> targetIDs = new();
             using (StreamReader reader = new StreamReader(targetPeptidePath))
             {
@@ -231,6 +246,68 @@ namespace Test
 
                 if (foundPeak != null)
                 {
+                    if (engine.VerboseOutput)
+                    {
+                        var envelopes = foundPeak.IsotopicEnvelopes
+                            .Select(e => (VerboseIsotopicEnvelope)e)
+                            .OrderBy(ve => ve.RetentionTime)
+                            .ToList();
+                        for (int i = 0; i < envelopes.Count; i++)
+                        {
+                            if (envelopes[i] == foundPeak.Apex)
+                            {
+                                int[] isotopeNumbers = envelopes[i].PeakDictionary
+                                    .OrderBy(kvp => kvp.Key)
+                                    .Select(kvp => kvp.Key)
+                                    .ToArray();
+                                double[] isotopeIntensitySums = new double[isotopeNumbers.Length];
+                                int envelopesAveraged = 1;
+                                for (int j = 0; j < isotopeNumbers.Length; j++)
+                                {
+                                    isotopeIntensitySums[j] = envelopes[i].PeakDictionary[isotopeNumbers[j]].Intensity;
+                                }
+                                if (i + 1 < envelopes.Count)
+                                {
+                                    for (int j = 0; j < isotopeNumbers.Length; j++)
+                                    {
+                                        if (envelopes[i + 1].PeakDictionary.TryGetValue(isotopeNumbers[j], out var imsPeak))
+                                            isotopeIntensitySums[j] += imsPeak.Intensity;
+                                    }
+                                    envelopesAveraged++;
+                                }
+                                if (i - 1 >= 0)
+                                {
+                                    for (int j = 0; j < isotopeNumbers.Length; j++)
+                                    {
+                                        if (envelopes[i - 1].PeakDictionary.TryGetValue(isotopeNumbers[j], out var imsPeak))
+                                            isotopeIntensitySums[j] += imsPeak.Intensity;
+                                    }
+                                    envelopesAveraged++;
+                                }
+
+                                double maxIntensity = isotopeIntensitySums.Max();
+                                for (int j = 0; j < isotopeNumbers.Length; j++)
+                                {
+                                    isotopeIntensitySums[j] = isotopeIntensitySums[j] / maxIntensity;
+                                }
+
+                                var theoreticalIsotopeRatios = engine
+                                    ._modifiedSequenceToIsotopicDistribution[target.ModifiedSequence]
+                                    .OrderBy(tuple => tuple.massShift);
+                                double[] theoreticalAbundance = new double[isotopeIntensitySums.Length];
+                                foreach (var shiftRatioPair in theoreticalIsotopeRatios)
+                                {
+                                    int isotope = (int)Math.Round(shiftRatioPair.massShift);
+                                    int isotopeIndex = isotopeNumbers.IndexOf(isotope);
+                                    if (isotopeIndex < 0) continue;
+                                    theoreticalAbundance[isotope] = shiftRatioPair.normalizedAbundance;
+                                }
+                                foundPeak.EnvelopeScore = CosineSimilarity(isotopeIntensitySums, theoreticalAbundance);
+                                break;
+                            }
+                        }
+                    }
+
                     targetPeaks.Add(foundPeak);
                     massDifferencesTarget.Add(
                         Math.Abs(
@@ -248,7 +325,7 @@ namespace Test
 
             placeholder = 2;
 
-            using(StreamWriter writer = new StreamWriter(@"C:\Users\Alex\Desktop\MBR_10_30\Take10_ChronTargetRT_Verbose.tsv"))
+            using(StreamWriter writer = new StreamWriter(@"C:\Users\Alex\Desktop\MBR_10_30\Take13_ChronTargetRT_10min_Verbose.tsv"))
             {
                 string[] header = new string[]
                     {
@@ -260,6 +337,7 @@ namespace Test
                         "Apex Intensity",
                         "Retention Time",
                         "Predicted Retention Time",
+                        "Isotopic Envelope Score",
                         "Isotope Peak Intensity",
                         "Isotope Peak RTs"
                     };
@@ -279,6 +357,7 @@ namespace Test
                         decoy.Apex.Intensity.ToString(),
                         decoy.Apex.IndexedPeak.RetentionTime.ToString(),
                         decoy.Identifications.First().Ms2RetentionTimeInMinutes.ToString(),
+                        decoy.EnvelopeScore.ToString(),
                         isotopeInfo["Isotope Peak Intensities"],
                         isotopeInfo["Isotope Peak RTs"]
                     };
@@ -299,6 +378,7 @@ namespace Test
                         target.Apex.Intensity.ToString(),
                         target.Apex.IndexedPeak.RetentionTime.ToString(),
                         target.Identifications.First().Ms2RetentionTimeInMinutes.ToString(),
+                        target.EnvelopeScore.ToString(),
                         isotopeInfo["Isotope Peak Intensities"],
                         isotopeInfo["Isotope Peak RTs"]
                     };
@@ -306,6 +386,38 @@ namespace Test
                 }
             }
 
+        }
+
+        //The cosine similarity returns values between 1 and -1 with 1 being closes and -1 being opposite and 0 being orthoganal
+        public static double? CosineSimilarity(double[] experimental, double[] theoretical)
+        {
+            if (experimental.Length == 0 || experimental.Length != theoretical.Length)
+            {
+                return null;
+            }
+            double numerator = 0;
+            double denominatorValue1 = 0;
+            double denominatorValue2 = 0;
+            for(int i = 0; i < experimental.Length; i++)
+            {
+                numerator += experimental[i] * theoretical[i];
+                denominatorValue1 += Math.Pow(experimental[i], 2);
+                denominatorValue2 += Math.Pow(theoretical[i], 2);
+            }
+            double denominatorProduct = denominatorValue1 * denominatorValue2;
+
+            //because we keep all secondary spectrum peaks, denominatorValue1 can equal zero
+            if (denominatorProduct == 0)
+            {
+                return 0;
+            }
+            return numerator / Math.Sqrt(denominatorProduct);
+        }
+
+        //Spectral contrast angle should expect values between 1 and -1;
+        public static double? SpectralContrastAngle(double[] experimental, double[] theoretical)
+        {
+            return (1 - 2 * Math.Acos((double)CosineSimilarity(experimental, theoretical)) / Math.PI);
         }
 
         [Test]
