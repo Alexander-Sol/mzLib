@@ -40,5 +40,30 @@ namespace Test
                 }
             }
         }
+
+        [Test]
+        public static void HumanReferenceDigest()
+        {
+            var proteins = ProteinDbLoader.LoadProteinXML(@"C:\Users\Alex\Documents\Proteomes\Uniprot_H_Sapiens_Reviewed_11_28_23.xml",
+                true, DecoyType.Reverse, null, isContaminant: false, null, out var unknownMods);
+
+            List<PeptideWithSetModifications> peptides = new();
+
+            foreach (Protein protein in proteins)
+            {
+                peptides.AddRange(protein.Digest(new DigestionParams(), null, null));
+            }
+
+            using (StreamWriter writer = new(@"C:\Users\Alex\Documents\Proteomes\H_Sapiens_tryptic_Peptides.tsv"))
+            {
+                writer.WriteLine("PeptideModSeq\tPeptideMonoisotopicMass");
+                foreach (var peptide in peptides)
+                {
+                    if (peptide.BaseSequence.Contains('U')) continue;
+                    writer.WriteLine(peptide.BaseSequence + '\t' + 
+                        peptide.MonoisotopicMass.ToString());
+                }
+            }
+        }
     }
 }
