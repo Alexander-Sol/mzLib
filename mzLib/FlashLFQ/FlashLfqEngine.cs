@@ -764,7 +764,7 @@ namespace FlashLFQ
                     .ToList();
                 
                 medianRtDiff = rtDiffs.Median();
-                rtRange = rtDiffs.InterquartileRange() * 3; // This is roughly equivalent to 2 standard deviations
+                rtRange = rtDiffs.InterquartileRange() * 4.5; // This is roughly equivalent to 2 standard deviations
             }
             
             double? rtStdDev = null;
@@ -1020,14 +1020,11 @@ namespace FlashLFQ
                     double start = best.IsotopicEnvelopes.Min(p => p.IndexedPeak.RetentionTime);
                     double end = best.IsotopicEnvelopes.Max(p => p.IndexedPeak.RetentionTime);
 
-                    //List<ChromatographicPeak> peaksToRemoveFromHypotheses = new List<ChromatographicPeak>();
                     foreach (ChromatographicPeak peak in peakHypotheses.Where(p => p.Apex.ChargeState != best.Apex.ChargeState))
                     {
                         if (peak.Apex.IndexedPeak.RetentionTime > start && peak.Apex.IndexedPeak.RetentionTime < end)
                         {
                             best.MergeFeatureWith(peak, Integrate);
-
-                            //peaksToRemoveFromHypotheses.Add(peak);
                         }
                     }
                 }
