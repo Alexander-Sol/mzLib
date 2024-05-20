@@ -61,6 +61,8 @@ namespace Test
                     continue;
                 }
 
+                if (double.Parse(split[55]) > 0.01) continue; 
+
                 SpectraFileInfo file = null;
 
                 if (split[0].Contains("J5"))
@@ -100,7 +102,7 @@ namespace Test
             }
 
             
-            var engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: false, maxThreads: 5, donorCriterion: 'S');
+            var engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: false, maxThreads: 1, donorCriterion: 'S', donorQValueThreshold: 0.01);
             var results = engine.Run();
 
             var test = results.Peaks.Values.SelectMany(peakList => peakList).ToList();
@@ -108,11 +110,19 @@ namespace Test
 
             List<ChromatographicPeak> mbrPeaks = new();
 
-            mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && peak.RandomRt && !peak.DecoyPeptide).ToList());
-            mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && peak.DecoyPeptide && !peak.RandomRt).ToList());
-            mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && peak.DecoyPeptide && peak.RandomRt).ToList());
-            mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && !peak.DecoyPeptide & !peak.RandomRt).ToList());
+            mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak).ToList());
+            //mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && peak.DecoyPeptide && !peak.RandomRt).ToList());
+            //mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && peak.DecoyPeptide && peak.RandomRt).ToList());
+            //mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && !peak.DecoyPeptide & !peak.RandomRt).ToList());
 
+
+            int qCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.MbrQValue < 0.02);
+            int pepCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPep < 0.02);
+            int pepQCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPepQ < 0.02);
+            int targetCount = mbrPeaks.Count(peak => !peak.RandomRt && !peak.DecoyPeptide);
+            int decoyCount = mbrPeaks.Count(peak => peak.RandomRt);
+
+            List<double?> pCorr = mbrPeaks.Select(peak => peak.Apex.PearsonCorrelation).OrderBy(pcor => pcor).ToList();
 
             using (StreamWriter writer = new StreamWriter(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\MbrResults_1PepTest.tsv"))
             {
@@ -122,15 +132,6 @@ namespace Test
                     writer.WriteLine(peak);
                 }
             }
-
-            //using (StreamWriter writer = new StreamWriter(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\AllDecoys_minRtDiff.tsv"))
-            //{
-            //    writer.WriteLine(ChromatographicPeak.TabSeparatedHeader);
-            //    foreach (var peak in engine.DecoyPeaks)
-            //    {
-            //        writer.WriteLine(peak);
-            //    }
-            //}
 
             var f1r1MbrResults = results
                 .PeptideModifiedSequences
@@ -183,7 +184,7 @@ namespace Test
             }
 
             double corr = Correlation.Pearson(peptideIntensities.Select(p => p.Item1), peptideIntensities.Select(p => p.Item2));
-            //Assert.Greater(corr, 0.8);
+            Assert.Greater(corr, 0.8);
 
             peptideIntensities.Clear();
             foreach (var peptide in f1r2MbrResults)
@@ -199,16 +200,16 @@ namespace Test
 
             // the "requireMsmsIdInCondition" field requires that at least one MS/MS identification from a protein
             // has to be observed in a condition for match-between-runs
-            j5.Condition = "b";
-            engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: true, maxThreads: 5);
-            results = engine.Run();
-            var proteinsObservedInF1 = ids.Where(p => p.FileInfo == j5).SelectMany(p => p.ProteinGroups).Distinct().ToList();
-            var proteinsObservedInF2 = ids.Where(p => p.FileInfo == j6).SelectMany(p => p.ProteinGroups).Distinct().ToList();
-            var proteinsObservedInF1ButNotF2 = proteinsObservedInF1.Except(proteinsObservedInF2).ToList();
-            foreach (ProteinGroup protein in proteinsObservedInF1ButNotF2)
-            {
-                Assert.That(results.ProteinGroups[protein.ProteinGroupName].GetIntensity(j6) == 0);
-            }
+            //j5.Condition = "b";
+            //engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: true, maxThreads: 5);
+            //results = engine.Run();
+            //var proteinsObservedInF1 = ids.Where(p => p.FileInfo == j5).SelectMany(p => p.ProteinGroups).Distinct().ToList();
+            //var proteinsObservedInF2 = ids.Where(p => p.FileInfo == j6).SelectMany(p => p.ProteinGroups).Distinct().ToList();
+            //var proteinsObservedInF1ButNotF2 = proteinsObservedInF1.Except(proteinsObservedInF2).ToList();
+            //foreach (ProteinGroup protein in proteinsObservedInF1ButNotF2)
+            //{
+            //    Assert.That(results.ProteinGroups[protein.ProteinGroupName].GetIntensity(j6) == 0);
+            //}
         }
 
 

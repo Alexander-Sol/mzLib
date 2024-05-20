@@ -10,12 +10,19 @@
         /// </summary>
         public readonly IndexedMassSpectralPeak IndexedPeak;
         public readonly int ChargeState;
+        public double? PearsonCorrelation { get; init; }
 
         public IsotopicEnvelope(IndexedMassSpectralPeak monoisotopicPeak, int chargeState, double intensity)
         {
             IndexedPeak = monoisotopicPeak;
             ChargeState = chargeState;
             Intensity = intensity / chargeState;
+        }
+
+        public IsotopicEnvelope(IndexedMassSpectralPeak monoisotopicPeak, int chargeState, double intensity, double pearsonCorrelation) : 
+            this(monoisotopicPeak, chargeState, intensity)
+        {
+            PearsonCorrelation = pearsonCorrelation;
         }
 
         /// <summary>

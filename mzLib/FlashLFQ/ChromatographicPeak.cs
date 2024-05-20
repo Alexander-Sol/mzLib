@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using FlashLFQ.PEP;
 
 namespace FlashLFQ
 {
@@ -19,10 +20,15 @@ namespace FlashLFQ
         public double PpmScore { get; set; }
         public double IntensityScore { get; set; }
         public double RtScore { get; set; }
+        public double RtPredictionError { get; set; }
         public double ScanCountScore { get; set; }
         public List<int> ChargeList { get; set; }
         public string Collision { get; set; }
         internal double MbrQValue { get; set; }
+        internal double PipPep { get; set; }
+        public double PipPepQ { get; set; }
+
+        public ChromatographicPeakData PepPeakData { get; set; }
 
         public ChromatographicPeak(Identification id, bool isMbrPeak, SpectraFileInfo fileInfo, bool randomRt = false)
         {
@@ -82,7 +88,9 @@ namespace FlashLFQ
                 sb.Append("Peak Charge" + "\t");
                 sb.Append("Num Charge States Observed" + "\t");
                 sb.Append("Peak Detection Type" + "\t");
-                sb.Append("MBR Q-Value" + "\t");
+                sb.Append("PIP Q-Value" + "\t");
+                sb.Append("PIP PEP" + "\t");
+                sb.Append("PIP PEP Q-Value" + "\t");
                 sb.Append("MBR Score" + "\t");
                 sb.Append("Ppm Score" + "\t");
                 sb.Append("Intensity Score" + "\t");
@@ -252,6 +260,8 @@ namespace FlashLFQ
             }
 
             sb.Append("" + (IsMbrPeak ? MbrQValue.ToString() : "") + "\t");
+            sb.Append("" + (IsMbrPeak ? PipPep.ToString() : "") + "\t");
+            sb.Append("" + (IsMbrPeak ? PipPepQ.ToString() : "") + "\t");
             sb.Append("" + (IsMbrPeak ? MbrScore.ToString() : "") + "\t");
             sb.Append("" + (IsMbrPeak ? PpmScore.ToString() : "") + "\t");
             sb.Append("" + (IsMbrPeak ? IntensityScore.ToString() : "") + "\t");

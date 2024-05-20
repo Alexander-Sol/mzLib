@@ -11,8 +11,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using UsefulProteomicsDatabases;
 using System.Runtime.CompilerServices;
-using System.IO;
 using Easy.Common.Extensions;
+using FlashLFQ.PEP;
+using System.IO;
 
 [assembly: InternalsVisibleTo("TestFlashLFQ")]
 
@@ -45,6 +46,7 @@ namespace FlashLFQ
         // New MBR Settings
         public readonly double RtWindowIncrease = 0;
         public readonly double MbrAlignmentWindow = 2.5;
+
         //public readonly double? MbrPpmTolerance;
         /// <summary>
         /// Specifies how the donor peak for MBR is selected. 
@@ -54,6 +56,7 @@ namespace FlashLFQ
         /// </summary>
         public char DonorCriterion { get; init; }
         public readonly double DonorQValueThreshold;
+        public readonly double PEPTrainingFraction;
 
         public readonly bool RequireMsmsIdInCondition;
 
@@ -86,6 +89,8 @@ namespace FlashLFQ
         internal Dictionary<SpectraFileInfo, List<ChromatographicPeak>> DonorFileToPeakDict { get; private set; }
         internal ConcurrentBag<ChromatographicPeak> DecoyPeaks { get; private set; }
         internal List<string> PeptidesForMbr { get; init; }
+
+        private bool _mbrRunning;
         
         public FlashLfqEngine(
             List<Identification> allIdentifications,
@@ -101,10 +106,13 @@ namespace FlashLFQ
 
             // MBR settings
             bool matchBetweenRuns = false,
-            double matchBetweenRunsPpmTolerance = 5.0,
+            double matchBetweenRunsPpmTolerance = 10.0,
             double maxMbrWindow = 1.0,
             bool requireMsmsIdInCondition = false,
             double matchBetweenRunsFdrThreshold = 0.05,
+            char donorCriterion = 'I',
+            double donorQValueThreshold = 0.01,
+            double pepTrainingFraction = 0.75,
 
             // settings for the Bayesian protein quantification engine
             bool bayesianProteinQuant = false,
@@ -115,8 +123,7 @@ namespace FlashLFQ
             bool useSharedPeptidesForProteinQuant = false,
             bool pairedSamples = false,
             int? randomSeed = null,
-            char donorCriterion = 'I',
-            double donorQValueThreshold = 0.01,
+
             List<string> peptidesForMbr = null)
         {
             Loaders.LoadElements();
@@ -153,6 +160,7 @@ namespace FlashLFQ
             DonorCriterion = donorCriterion;
             DonorQValueThreshold = donorQValueThreshold;
             MbrDetectionQValueThreshold = matchBetweenRunsFdrThreshold;
+            PEPTrainingFraction = pepTrainingFraction;
 
             RequireMsmsIdInCondition = requireMsmsIdInCondition;
             Normalize = normalize;
@@ -186,6 +194,7 @@ namespace FlashLFQ
             _globalStopwatch.Start();
             _ms1Scans = new Dictionary<SpectraFileInfo, Ms1ScanInfo[]>();
             _results = new FlashLfqResults(_spectraFileInfo, _allIdentifications, MbrDetectionQValueThreshold);
+            _mbrRunning = false;
 
             // build m/z index keys
             CalculateTheoreticalIsotopeDistributions();
@@ -225,6 +234,7 @@ namespace FlashLFQ
             // do MBR
             if (MatchBetweenRuns)
             {
+                _mbrRunning = true;
                 Console.WriteLine("Find the best donors for match-between-runs");
                 FindPeptideDonorFiles();
                 foreach (var spectraFile in _spectraFileInfo)
@@ -236,8 +246,6 @@ namespace FlashLFQ
 
                     QuantifyMatchBetweenRunsPeaks(spectraFile);
 
-                    CalculateFdrForMbrPeaks();
-
                     _peakIndexingEngine.ClearIndex();
 
                     if (!Silent)
@@ -245,6 +253,9 @@ namespace FlashLFQ
                         Console.WriteLine("Finished MBR for " + spectraFile.FilenameWithoutExtension);
                     }
                 }
+
+                CalculateFdrForMbrPeaks();
+
                 _results.DecoyPeaks = DecoyPeaks;
             }
 
@@ -1323,6 +1334,41 @@ namespace FlashLFQ
                 mbrPeaks[i].MbrQValue = correctedQs[i];
             }
 
+            List<double> tempPepQs = new();
+            if (correctedQs.Length > 100 && (doubleDecoys+decoyPeaks) > 20)
+            {
+                PEP_Analysis_Cross_Validation.ComputePEPValuesForAllPeaks(mbrPeaks,
+                    outputFolder: Path.GetDirectoryName(_spectraFileInfo.First().FullFilePathWithExtension),
+                    maxThreads: MaxThreads,
+                    pepTrainingFraction: PEPTrainingFraction);
+
+                var pepPeaks = mbrPeaks.OrderBy(peak => peak.PipPep).ToList();
+                double runningTotalPep = 0;
+                decoyPeptides = 0;
+                doubleDecoys = 0;
+                for(int i = 0; i < pepPeaks.Count; i++)
+                {
+                    if(!pepPeaks[i].DecoyPeptide)
+                    {
+                        runningTotalPep += pepPeaks[i].PipPep;
+                    }
+                    else
+                    {
+                        if (pepPeaks[i].RandomRt) doubleDecoys++;
+                        else decoyPeptides++;
+                    }
+                    // There are two parts to this score. We're summing the PEPs of peaks derived from target peptides. For peaks derived from decoy peptides,
+                    // We do the double decoy things where we count decoyPeptidePeaks - doubleDecoypeaks
+                    tempPepQs.Add(Math.Round( (runningTotalPep + EstimateDecoyPeptideErrors(decoyPeptides, doubleDecoys)) / (i+1), 6));
+                }
+
+                // Set the q-value for each peak
+                double[] correctedPepQs = CorrectQValues(tempPepQs);
+                for (int i = 0; i < correctedPepQs.Length; i++)
+                {
+                    pepPeaks[i].PipPepQ = correctedPepQs[i];
+                }
+            }
         }
 
         private int EstimateDecoyPeptideErrors(int decoyPeptideCount, int doubleDecoyCount)
@@ -1460,7 +1506,7 @@ namespace FlashLFQ
                 }
 
                 // Check that the experimental envelope matches the theoretical
-                if (CheckIsotopicEnvelopeCorrelation(massShiftToIsotopePeaks, peak, chargeState, isotopeTolerance))
+                if (CheckIsotopicEnvelopeCorrelation(massShiftToIsotopePeaks, peak, chargeState, isotopeTolerance, out var corr))
                 {
                     // impute unobserved isotope peak intensities
                     // TODO: Figure out why value imputation is performed. Build a toggle?
@@ -1472,7 +1518,7 @@ namespace FlashLFQ
                         }
                     }
 
-                    isotopicEnvelopes.Add(new IsotopicEnvelope(peak, chargeState, experimentalIsotopeIntensities.Sum()));
+                    isotopicEnvelopes.Add(new IsotopicEnvelope(peak, chargeState, experimentalIsotopeIntensities.Sum(), pearsonCorrelation: corr));
                 }
             }
 
@@ -1493,9 +1539,10 @@ namespace FlashLFQ
             Dictionary<int, List<(double expIntensity, double theorIntensity, double theorMass)>> massShiftToIsotopePeaks,
             IndexedMassSpectralPeak peak,
             int chargeState,
-            Tolerance isotopeTolerance)
+            Tolerance isotopeTolerance,
+            out double pearsonCorrelation)
         {
-            double pearsonCorrelation = Correlation.Pearson(
+            pearsonCorrelation = Correlation.Pearson(
                 massShiftToIsotopePeaks[0].Select(p => p.expIntensity),
                 massShiftToIsotopePeaks[0].Select(p => p.theorIntensity));
 
@@ -1541,9 +1588,11 @@ namespace FlashLFQ
                 corrShiftedRight = -1;
             }
 
+            double minimumCorrelation = _mbrRunning ? 0.3 : 0.7;
+
             // If these conditions are true, the isotopic envelope matches the expected envelope better than 
             // either alternative (i.e., +/- missed mono-isotopic)
-            return pearsonCorrelation > 0.7 && corrShiftedLeft - corrWithPadding < 0.1 && corrShiftedRight - corrWithPadding < 0.1;
+            return pearsonCorrelation > minimumCorrelation && corrShiftedLeft - corrWithPadding < 0.1 && corrShiftedRight - corrWithPadding < 0.1;
         }
 
         /// <summary>

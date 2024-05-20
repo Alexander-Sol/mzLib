@@ -118,17 +118,21 @@ namespace FlashLFQ
         /// <returns> An MBR Score ranging between 0 and 100. Higher scores are better. </returns>
         internal double ScoreMbr(ChromatographicPeak acceptorPeak, ChromatographicPeak donorPeak, double predictedRt)
         {
-            acceptorPeak.IntensityScore = CalculateIntensityScore(acceptorPeak.Intensity, donorPeak);
+            double rtError = predictedRt - acceptorPeak.ApexRetentionTime;
+            acceptorPeak.RtPredictionError = rtError;
             acceptorPeak.RtScore = CalculateScore(_rtPredictionErrorDistributionDictionary[donorPeak.SpectraFileInfo],
-                predictedRt - acceptorPeak.ApexRetentionTime);
+                rtError);
+            acceptorPeak.IntensityScore = CalculateIntensityScore(acceptorPeak.Intensity, donorPeak);
             acceptorPeak.PpmScore = CalculateScore(_ppmDistribution, acceptorPeak.MassError);
             acceptorPeak.ScanCountScore = CalculateScore(_scanCountDistribution, acceptorPeak.ScanCount);
             
             // Returns 100 times the geometric mean of the four scores (scan count, intensity score, rt score, ppm score)
-            return 100 * Math.Pow(acceptorPeak.IntensityScore 
-                * acceptorPeak.RtScore
-                * acceptorPeak.PpmScore 
-                * acceptorPeak.ScanCountScore, 0.25);
+            return 100 * Math.Pow(
+                acceptorPeak.IntensityScore *
+                acceptorPeak.RtScore *
+                acceptorPeak.PpmScore *
+                acceptorPeak.ScanCountScore,
+                0.25);
         }
 
         // Setting a minimum score prevents the MBR score from going to zero if one component of that score is 0
