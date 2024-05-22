@@ -47,6 +47,9 @@ namespace FlashLFQ
         public readonly double RtWindowIncrease = 0;
         public readonly double MbrAlignmentWindow = 2.5;
 
+        public readonly double DonorQValueThreshold;
+        public readonly double PEPTrainingFraction;
+
         //public readonly double? MbrPpmTolerance;
         /// <summary>
         /// Specifies how the donor peak for MBR is selected. 
@@ -55,8 +58,6 @@ namespace FlashLFQ
         /// 'N' selects the donor peak with the most neighboring peaks
         /// </summary>
         public char DonorCriterion { get; init; }
-        public readonly double DonorQValueThreshold;
-        public readonly double PEPTrainingFraction;
 
         public readonly bool RequireMsmsIdInCondition;
 
