@@ -116,13 +116,15 @@ namespace Test
             //mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && !peak.DecoyPeptide & !peak.RandomRt).ToList());
 
 
-            int qCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.MbrQValue < 0.02);
-            int pepCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPep < 0.02);
-            int pepQCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPepQ < 0.02);
+            int qCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.MbrQValue < 0.015);
+            int pepCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPep < 0.015);
+            int pepQCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPepQ < 0.015);
             int targetCount = mbrPeaks.Count(peak => !peak.RandomRt && !peak.DecoyPeptide);
             int decoyCount = mbrPeaks.Count(peak => peak.RandomRt);
 
             List<double?> pCorr = mbrPeaks.Select(peak => peak.Apex.PearsonCorrelation).OrderBy(pcor => pcor).ToList();
+
+            results.WritePepResults(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\PepResults_217.txt");
 
             using (StreamWriter writer = new StreamWriter(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\MbrResults_1PepTest.tsv"))
             {
@@ -172,7 +174,6 @@ namespace Test
 
                 tempQs.Add(tempQ);
             }
-            
 
             List<(double, double)> peptideIntensities = new List<(double, double)>();
 
@@ -332,6 +333,11 @@ namespace Test
             mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && peak.DecoyPeptide && peak.RandomRt).ToList());
             mbrPeaks.AddRange(test.Where(peak => peak.IsMbrPeak && !peak.DecoyPeptide & !peak.RandomRt).ToList());
 
+            int qCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.MbrQValue < 0.015);
+            int pepCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPep < 0.015);
+            int pepQCount = mbrPeaks.Where(peak => !peak.RandomRt && !peak.DecoyPeptide).Count(peak => peak.PipPepQ < 0.015);
+            int targetCount = mbrPeaks.Count(peak => !peak.RandomRt && !peak.DecoyPeptide);
+            int decoyCount = mbrPeaks.Count(peak => peak.RandomRt);
 
             //using (StreamWriter writer = new StreamWriter(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\MbrResults_1PeakPerPepScore.tsv"))
             //{
@@ -354,6 +360,8 @@ namespace Test
             var f1r1MbrResults = results
                 .PeptideModifiedSequences
                 .Where(p => p.Value.GetDetectionType(j5) == DetectionType.MBR && p.Value.GetDetectionType(j6) == DetectionType.MSMS).ToList();
+
+            var qMin = mbrPeaks.Min(peak => peak.MbrQValue);
 
             Assert.That(f1r1MbrResults.Count >= 132);
 

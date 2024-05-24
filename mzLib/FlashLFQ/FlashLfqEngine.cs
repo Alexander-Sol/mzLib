@@ -1293,8 +1293,7 @@ namespace FlashLFQ
         }
 
         /// <summary>
-        /// Calculates the FDR for each MBR-detected peak using decoy peaks and decoy peptides,
-        /// Then filters out all peaks below a given FDR threshold
+        /// Calculates the FDR for each MBR-detected peak using decoy peaks and decoy peptides
         /// </summary>
         private void CalculateFdrForMbrPeaks()
         {
@@ -1302,56 +1301,35 @@ namespace FlashLFQ
                 .Where(peak => peak.IsMbrPeak)
                 .OrderByDescending(peak => peak.MbrScore)
                 .ToList();
-
+            
             if (!mbrPeaks.IsNotNullOrEmpty()) return;
-
-            int allPeakCount = 0;
-            int decoyPeaks = 0;
-            int decoyPeptides = 0;
-            int doubleDecoys = 0;
-            List<double> tempQs = new();
-
-            // Calculate tempory q-values for each peak by counting each type of decoy
-            foreach (var peak in mbrPeaks)
-            {
-                allPeakCount++;
-                if(peak.DecoyPeptide)
-                {
-                    if (peak.RandomRt) doubleDecoys++;
-                    else decoyPeptides++;
-                }
-                else if (peak.RandomRt)
-                {
-                    decoyPeaks++;
-                }
-
-                tempQs.Add(EstimateFdr(doubleDecoys, decoyPeptides, decoyPeaks, allPeakCount)); 
-            }
-
-            // Set the q-value for each peak
-            double[] correctedQs = CorrectQValues(tempQs);
-            for(int i = 0; i < correctedQs.Length; i++)
-            {
-                mbrPeaks[i].MbrQValue = correctedQs[i];
-            }
+            int decoyPeakTotal = mbrPeaks.Count(peak => peak.RandomRt);
 
             List<double> tempPepQs = new();
-            if (correctedQs.Length > 100 && (doubleDecoys+decoyPeaks) > 20)
+            List<double> tempQs = new();
+            if (mbrPeaks.Count > 100 && decoyPeakTotal > 20)
             {
-                PEP_Analysis_Cross_Validation.ComputePEPValuesForAllPeaks(mbrPeaks,
+                var pepOutput = PEP_Analysis_Cross_Validation.ComputePEPValuesForAllPeaks(mbrPeaks,
                     outputFolder: Path.GetDirectoryName(_spectraFileInfo.First().FullFilePathWithExtension),
                     maxThreads: MaxThreads,
                     pepTrainingFraction: PEPTrainingFraction);
+                _results.PepResultString = pepOutput;
 
                 var pepPeaks = mbrPeaks.OrderBy(peak => peak.PipPep).ToList();
                 double runningTotalPep = 0;
-                decoyPeptides = 0;
-                doubleDecoys = 0;
-                for(int i = 0; i < pepPeaks.Count; i++)
+                int targetPeaks = 0;
+                int decoyPeptides = 0;
+                int decoyPeaks = 0;
+                int doubleDecoys = 0;
+                for (int i = 0; i < pepPeaks.Count; i++)
                 {
-                    if(!pepPeaks[i].DecoyPeptide)
+                    if (!pepPeaks[i].DecoyPeptide)
                     {
+                        // We're just summing the PEP probabilities from all non decoy peptides
                         runningTotalPep += pepPeaks[i].PipPep;
+                        // And doing an absolute count
+                        if (pepPeaks[i].RandomRt) decoyPeaks++;
+                        else targetPeaks++;
                     }
                     else
                     {
@@ -1360,16 +1338,51 @@ namespace FlashLFQ
                     }
                     // There are two parts to this score. We're summing the PEPs of peaks derived from target peptides. For peaks derived from decoy peptides,
                     // We do the double decoy things where we count decoyPeptidePeaks - doubleDecoypeaks
-                    tempPepQs.Add(Math.Round( (runningTotalPep + EstimateDecoyPeptideErrors(decoyPeptides, doubleDecoys)) / (i+1), 6));
+                    tempPepQs.Add(Math.Round((runningTotalPep + EstimateDecoyPeptideErrors(decoyPeptides, doubleDecoys)) / (i + 1), 6));
+                    tempQs.Add(EstimateFdr(doubleDecoys, decoyPeptides, decoyPeaks, i));
                 }
 
                 // Set the q-value for each peak
                 double[] correctedPepQs = CorrectQValues(tempPepQs);
+                double[] correctedQs = CorrectQValues(tempQs);
                 for (int i = 0; i < correctedPepQs.Length; i++)
                 {
                     pepPeaks[i].PipPepQ = correctedPepQs[i];
+                    pepPeaks[i].MbrQValue = correctedQs[i];
                 }
             }
+            else
+            {
+                int allPeakCount = 0;
+                int decoyPeaks = 0;
+                int decoyPeptides = 0;
+                int doubleDecoys = 0;
+
+                // Calculate tempory q-values for each peak by counting each type of decoy
+                foreach (var peak in mbrPeaks)
+                {
+                    allPeakCount++;
+                    if (peak.DecoyPeptide)
+                    {
+                        if (peak.RandomRt) doubleDecoys++;
+                        else decoyPeptides++;
+                    }
+                    else if (peak.RandomRt)
+                    {
+                        decoyPeaks++;
+                    }
+
+                    tempQs.Add(EstimateFdr(doubleDecoys, decoyPeptides, decoyPeaks, allPeakCount));
+                }
+
+                // Set the q-value for each peak
+                double[] correctedQs = CorrectQValues(tempQs);
+                for (int i = 0; i < correctedQs.Length; i++)
+                {
+                    mbrPeaks[i].MbrQValue = correctedQs[i];
+                }
+            }
+
         }
 
         private int EstimateDecoyPeptideErrors(int decoyPeptideCount, int doubleDecoyCount)

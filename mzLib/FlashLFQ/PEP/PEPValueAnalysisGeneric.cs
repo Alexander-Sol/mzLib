@@ -13,10 +13,8 @@ namespace FlashLFQ.PEP
 {
     public static class PEP_Analysis_Cross_Validation
     {
-        public static double PipQValueCutoff;
+        public static double PipScoreCutoff;
 
-        private static readonly double AbsoluteProbabilityThatDistinguishesPeptides = 0.05;
-       
         public static string ComputePEPValuesForAllPeaks(List<ChromatographicPeak> peaks, string outputFolder, int maxThreads, double pepTrainingFraction)
         {
             string[] trainingVariables = ChromatographicPeakData.trainingInfos["standard"];
@@ -24,18 +22,8 @@ namespace FlashLFQ.PEP
             //ensure that the order is always stable.
             peaks = peaks.OrderBy(p => p.GetHashCode()).ToList();
 
-            var peakQValues = peaks.Select(peak => peak.MbrQValue).OrderBy(q => q).ToList();
-            PipQValueCutoff = peakQValues[(int)Math.Floor(peakQValues.Count * pepTrainingFraction)]; //Select the top 75 percent of all peaks, only use those as positive examples
-
-            //These two dictionaries contain the average and standard deviations of hydrophobicitys measured in 1 minute increments accross each raw
-            //file separately. An individully measured hydrobophicty calculated for a specific PSM sequence is compared to these values by computing
-            //the z-score. That z-score is used as a feature for machine learning.
-            //Separate dictionaries are created for peptides with modifications because SSRcalc doesn't really do a good job predicting hyrophobicity
-
-            //The first string in the dictionary is the filename
-            //The value of the dictionary is another dictionary that profiles the hydrophobicity behavior.
-            //Each key is a retention time rounded to the nearest minute.
-            //The value Tuple is the average and standard deviation, respectively, of the predicted hydrophobicities of the observed peptides eluting at that rounded retention time.
+            var peakScores = peaks.Select(peak => peak.MbrScore).OrderByDescending(q => q).ToList();
+            PipScoreCutoff = peakScores[(int)Math.Floor(peakScores.Count * pepTrainingFraction)]; //Select the top 75 percent of all peaks, only use those as positive examples
 
             MLContext mlContext = new MLContext();
             //the number of groups used for cross-validation is hard-coded at four. Do not change this number without changes other areas of effected code.
@@ -46,6 +34,13 @@ namespace FlashLFQ.PEP
             for (int i = 0; i < numGroups; i++)
             {
                 ChromatographicPeakDataGroups[i] = CreateChromatographicPeakData(peaks, peakGroupIndices[i], maxThreads);
+                //int decoyCount = ChromatographicPeakDataGroups[i].Count(pda => !pda.Label);
+                //int targetCount = ChromatographicPeakDataGroups[i].Count(pda => pda.Label);
+                //var downsampledTargets = ChromatographicPeakDataGroups[i].Where(pda => pda.Label).Take(decoyCount);
+                //ChromatographicPeakDataGroups[i] = downsampledTargets.Concat(ChromatographicPeakDataGroups[i].Where(pda => !pda.Label));
+
+                //decoyCount = ChromatographicPeakDataGroups[i].Count(pda => !pda.Label);
+                //targetCount = ChromatographicPeakDataGroups[i].Count(pda => pda.Label);
             }
 
             TransformerChain<BinaryPredictionTransformer<Microsoft.ML.Calibrators.CalibratedModelParametersBase<Microsoft.ML.Trainers.FastTree.FastTreeBinaryModelParameters, Microsoft.ML.Calibrators.PlattCalibrator>>>[] trainedModels = new TransformerChain<BinaryPredictionTransformer<Microsoft.ML.Calibrators.CalibratedModelParametersBase<Microsoft.ML.Trainers.FastTree.FastTreeBinaryModelParameters, Microsoft.ML.Calibrators.PlattCalibrator>>>[numGroups];
@@ -151,7 +146,6 @@ namespace FlashLFQ.PEP
             s.AppendLine("*       PositiveRecall:  " + positiveRecall.Average().ToString());
             s.AppendLine("*       NegativePrecision:  " + negativePrecision.Average().ToString());
             s.AppendLine("*       NegativeRecall:  " + negativeRecall.Average().ToString());
-            s.AppendLine("*       Count of Ambiguous Peptides Removed:  " + sumOfAllAmbiguousPeptidesResolved.ToString());
             s.AppendLine("************************************************************");
             return s.ToString();
         }
@@ -294,13 +288,14 @@ namespace FlashLFQ.PEP
                         {
                             label = false;
                             newChromatographicPeakData = CreateOneChromatographicPeakDataEntry(peak, label);
+                            localChromatographicPeakDataList.Add(newChromatographicPeakData);
                         }
-                        else if (!peak.RandomRt && !peak.DecoyPeptide && peak.MbrQValue <= PipQValueCutoff)
+                        else if (!peak.RandomRt && !peak.DecoyPeptide && peak.MbrQValue <= PipScoreCutoff)
                         {
                             label = true;
                             newChromatographicPeakData = CreateOneChromatographicPeakDataEntry(peak, label);
+                            localChromatographicPeakDataList.Add(newChromatographicPeakData);
                         }
-                        localChromatographicPeakDataList.Add(newChromatographicPeakData);
                     }
                     lock (ChromatographicPeakDataListLock)
                     {

@@ -125,14 +125,18 @@ namespace FlashLFQ
             acceptorPeak.IntensityScore = CalculateIntensityScore(acceptorPeak.Intensity, donorPeak);
             acceptorPeak.PpmScore = CalculateScore(_ppmDistribution, acceptorPeak.MassError);
             acceptorPeak.ScanCountScore = CalculateScore(_scanCountDistribution, acceptorPeak.ScanCount);
-            
+
+            // Scales the score between 0 and 1
+            double envelopeScore = acceptorPeak.Apex?.PearsonCorrelation == null ? _minScore : ((double)acceptorPeak.Apex.PearsonCorrelation - 0.3) * (1.0 / 0.7);
+
             // Returns 100 times the geometric mean of the four scores (scan count, intensity score, rt score, ppm score)
             return 100 * Math.Pow(
                 acceptorPeak.IntensityScore *
                 acceptorPeak.RtScore *
                 acceptorPeak.PpmScore *
+                envelopeScore *
                 acceptorPeak.ScanCountScore,
-                0.25);
+                0.20);
         }
 
         // Setting a minimum score prevents the MBR score from going to zero if one component of that score is 0

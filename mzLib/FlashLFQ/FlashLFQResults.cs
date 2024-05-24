@@ -16,6 +16,7 @@ namespace FlashLFQ
         public readonly Dictionary<SpectraFileInfo, List<ChromatographicPeak>> Peaks;
         public readonly Dictionary<SpectraFileInfo, List<ChromatographicPeak>> DoubleCheckPeaks;
         public  IEnumerable<ChromatographicPeak> DecoyPeaks { get; set; }
+        public string PepResultString { get; internal set; }
 
         public double MbrQValueThreshold { get; set; }
 
@@ -546,6 +547,14 @@ namespace FlashLFQ
                         }
                     }
                 }
+            }
+        }
+
+        public void WritePepResults(string pepOutputPath)
+        {
+            using (StreamWriter output = new StreamWriter(pepOutputPath))
+            {
+                output.Write(PepResultString);
             }
         }
 
