@@ -102,7 +102,7 @@ namespace Test
             }
 
             
-            var engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: false, maxThreads: 1, donorCriterion: 'S', donorQValueThreshold: 0.01);
+            var engine = new FlashLfqEngine(ids, matchBetweenRuns: true, requireMsmsIdInCondition: false, maxThreads: 1, donorCriterion: 'S', donorQValueThreshold: 0.01, matchBetweenRunsFdrThreshold: 0.01);
             var results = engine.Run();
 
             var test = results.Peaks.Values.SelectMany(peakList => peakList).ToList();

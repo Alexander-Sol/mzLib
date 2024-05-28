@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using FlashLFQ.PEP;
+using Easy.Common.Extensions;
 
 namespace FlashLFQ
 {
@@ -113,7 +114,30 @@ namespace FlashLFQ
         {
             if (IsotopicEnvelopes.Any())
             {
-                Apex = IsotopicEnvelopes.MaxBy(p => p.Intensity);
+                if(IsMbrPeak)
+                {
+                    var highCorrEnv = IsotopicEnvelopes.Where(env => env.PearsonCorrelation > 0.7);
+                    if(highCorrEnv.IsNotNullOrEmpty())
+                    {
+                        Apex = highCorrEnv.MaxBy(p => p.Intensity);
+                    }
+                    else
+                    {
+                        var medCorrEnv = IsotopicEnvelopes.Where(env => env.PearsonCorrelation > 0.5);
+                        if(medCorrEnv.IsNotNullOrEmpty())
+                        {
+                            Apex = medCorrEnv.MaxBy(p => p.Intensity);
+                        }
+                        else
+                        {
+                            Apex = IsotopicEnvelopes.MaxBy(p => p.Intensity);
+                        }
+                    }
+                }
+                else
+                {
+                    Apex = IsotopicEnvelopes.MaxBy(p => p.Intensity);
+                }
 
                 if (integrate)
                 {

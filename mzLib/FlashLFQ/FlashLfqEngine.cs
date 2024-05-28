@@ -1033,7 +1033,7 @@ namespace FlashLFQ
                         {
                             if (peak.Apex.IndexedPeak.RetentionTime >= start 
                                 && peak.Apex.IndexedPeak.RetentionTime <= end
-                                && peak.MbrScore > 25) // 25 is a rough heuristic, but I don't want super shitty peaks being able to supercede the intensity of a good peak!
+                                && peak.MbrScore > 40) // 40 is a rough heuristic, but I don't want super shitty peaks being able to supercede the intensity of a good peak!
                             {
                                 if (msmsImsPeaks.TryGetValue(peak.Apex.IndexedPeak.ZeroBasedMs1ScanIndex, out var peakList) && peakList.Contains(peak.Apex.IndexedPeak))
                                 {
