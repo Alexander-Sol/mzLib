@@ -201,6 +201,10 @@ namespace FlashLFQ.PEP
 
                             ChromatographicPeakData pd = CreateOneChromatographicPeakDataEntry(peak, label: !peak.RandomRt) ;
                             var pepValuePrediction = threadPredictionEngine.Predict(pd);
+                            if(peak.DecoyPeptide)
+                            {
+                                int placeholder = 1;
+                            }
                             pepValuePredictions.Add(pepValuePrediction.Probability);
                             peak.PipPep = 1 - pepValuePrediction.Probability;
 
