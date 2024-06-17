@@ -124,9 +124,9 @@ namespace Test
 
             List<double?> pCorr = mbrPeaks.Select(peak => peak.Apex.PearsonCorrelation).OrderBy(pcor => pcor).ToList();
 
-            results.WritePepResults(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\PepResults_217.txt");
+            results.WritePepResults(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\PepResults_220.txt");
 
-            using (StreamWriter writer = new StreamWriter(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\MbrResults_1PepTest.tsv"))
+            using (StreamWriter writer = new StreamWriter(@"D:\SingleCellDataSets\Organoid\TwoFileSearch\Task1-SearchTask\RealMBR\MbrResults_NewOutputTest.tsv"))
             {
                 writer.WriteLine(ChromatographicPeak.TabSeparatedHeader);
                 foreach (var peak in mbrPeaks)

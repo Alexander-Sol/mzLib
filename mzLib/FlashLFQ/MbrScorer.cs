@@ -127,14 +127,14 @@ namespace FlashLFQ
             acceptorPeak.ScanCountScore = CalculateScore(_scanCountDistribution, acceptorPeak.ScanCount);
 
             // Scales the score between 0 and 1
-            double envelopeScore = acceptorPeak.Apex?.PearsonCorrelation == null ? _minScore : ((double)acceptorPeak.Apex.PearsonCorrelation - 0.3) * (1.0 / 0.7);
+            acceptorPeak.IsotopicEnvelopeScore = acceptorPeak.Apex?.PearsonCorrelation == null ? _minScore : ((double)acceptorPeak.Apex.PearsonCorrelation - 0.3) * (1.0 / 0.7);
 
             // Returns 100 times the geometric mean of the four scores (scan count, intensity score, rt score, ppm score)
             return 100 * Math.Pow(
                 acceptorPeak.IntensityScore *
                 acceptorPeak.RtScore *
                 acceptorPeak.PpmScore *
-                envelopeScore *
+                acceptorPeak.IsotopicEnvelopeScore *
                 acceptorPeak.ScanCountScore,
                 0.20);
         }

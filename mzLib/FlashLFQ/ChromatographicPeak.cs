@@ -23,6 +23,7 @@ namespace FlashLFQ
         public double RtScore { get; set; }
         public double RtPredictionError { get; set; }
         public double ScanCountScore { get; set; }
+        public double IsotopicEnvelopeScore { get; set; }
         public List<int> ChargeList { get; set; }
         public string Collision { get; set; }
         internal double MbrQValue { get; set; }
@@ -67,64 +68,22 @@ namespace FlashLFQ
         public bool RandomRt { get; }
         public bool DecoyPeptide => Identifications.First().IsDecoy;
 
-        public static string TabSeparatedHeader
-        {
-            get
-            {
-                var sb = new StringBuilder();
-                sb.Append("File Name" + "\t");
-                sb.Append("Base Sequence" + "\t");
-                sb.Append("Full Sequence" + "\t");
-                sb.Append("Protein Group" + "\t");
-                sb.Append("Organism" + '\t');
-                sb.Append("Peptide Monoisotopic Mass" + "\t");
-                sb.Append("MS2 Retention Time" + "\t");
-                sb.Append("Precursor Charge" + "\t");
-                sb.Append("Theoretical MZ" + "\t");
-                sb.Append("Peak intensity" + "\t");
-                sb.Append("Peak RT Start" + "\t");
-                sb.Append("Peak RT Apex" + "\t");
-                sb.Append("Peak RT End" + "\t");
-                sb.Append("Peak MZ" + "\t");
-                sb.Append("Peak Charge" + "\t");
-                sb.Append("Num Charge States Observed" + "\t");
-                sb.Append("Peak Detection Type" + "\t");
-                sb.Append("PIP Q-Value" + "\t");
-                sb.Append("PIP PEP" + "\t");
-                sb.Append("PIP PEP Q-Value" + "\t");
-                sb.Append("MBR Score" + "\t");
-                sb.Append("Ppm Score" + "\t");
-                sb.Append("Intensity Score" + "\t");
-                sb.Append("Rt Score" + "\t");
-                sb.Append("Scan Count Score" + "\t");
-                sb.Append("PSMs Mapped" + "\t");
-                sb.Append("Base Sequences Mapped" + "\t");
-                sb.Append("Full Sequences Mapped" + "\t");
-                sb.Append("Peak Split Valley RT" + "\t");
-                sb.Append("Peak Apex Mass Error (ppm)");
-                sb.Append("\t" + "Decoy Peptide");
-                sb.Append("\t" + "Random Rt");
-                sb.Append("\t" + "Collision");
-                //sb.Append("Timepoints");
-                return sb.ToString();
-            }
-        }
 
         public void CalculateIntensityForThisFeature(bool integrate)
         {
             if (IsotopicEnvelopes.Any())
             {
-                if(IsMbrPeak)
+                if (IsMbrPeak)
                 {
                     var highCorrEnv = IsotopicEnvelopes.Where(env => env.PearsonCorrelation > 0.7);
-                    if(highCorrEnv.IsNotNullOrEmpty())
+                    if (highCorrEnv.IsNotNullOrEmpty())
                     {
                         Apex = highCorrEnv.MaxBy(p => p.Intensity);
                     }
                     else
                     {
                         var medCorrEnv = IsotopicEnvelopes.Where(env => env.PearsonCorrelation > 0.5);
-                        if(medCorrEnv.IsNotNullOrEmpty())
+                        if (medCorrEnv.IsNotNullOrEmpty())
                         {
                             Apex = medCorrEnv.MaxBy(p => p.Intensity);
                         }
@@ -199,6 +158,57 @@ namespace FlashLFQ
         {
             this.NumIdentificationsByBaseSeq = Identifications.Select(v => v.BaseSequence).Distinct().Count();
             this.NumIdentificationsByFullSeq = Identifications.Select(v => v.ModifiedSequence).Distinct().Count();
+        }
+
+        public static string TabSeparatedHeader
+        {
+            get
+            {
+                var sb = new StringBuilder();
+                sb.Append("File Name" + "\t");
+                sb.Append("Base Sequence" + "\t");
+                sb.Append("Full Sequence" + "\t");
+                sb.Append("Protein Group" + "\t");
+                sb.Append("Organism" + '\t');
+                sb.Append("Peptide Monoisotopic Mass" + "\t");
+                sb.Append("MS2 Retention Time" + "\t");
+                sb.Append("Precursor Charge" + "\t");
+                sb.Append("Theoretical MZ" + "\t");
+                sb.Append("Peak intensity" + "\t");
+                sb.Append("Peak RT Start" + "\t");
+                sb.Append("Peak RT Apex" + "\t");
+                sb.Append("Peak RT End" + "\t");
+                sb.Append("Peak MZ" + "\t");
+                sb.Append("Peak Charge" + "\t");
+                sb.Append("Num Charge States Observed" + "\t");
+                sb.Append("Peak Detection Type" + "\t");
+                sb.Append("PIP Q-Value" + "\t");
+                sb.Append("PIP PEP" + "\t");
+                sb.Append("PIP PEP Q-Value" + "\t");
+                sb.Append("MBR Score" + "\t");
+                sb.Append("Ppm Score" + "\t");
+                sb.Append("Intensity Score" + "\t");
+                sb.Append("Rt Score" + "\t");
+                sb.Append("Scan Count Score" + "\t");
+                sb.Append("Isotopic Envelope Score" + "\t");
+
+                sb.Append("Mass Error" + "\t");
+                sb.Append("Log2 Intensity" + "\t");
+                sb.Append("Rt Prediction Error" + "\t");
+                sb.Append("Scan Count" + "\t");
+                sb.Append("Pearson Correlation" + "\t");
+
+                sb.Append("PSMs Mapped" + "\t");
+                sb.Append("Base Sequences Mapped" + "\t");
+                sb.Append("Full Sequences Mapped" + "\t");
+                sb.Append("Peak Split Valley RT" + "\t");
+                sb.Append("Peak Apex Mass Error (ppm)");
+                sb.Append("\t" + "Decoy Peptide");
+                sb.Append("\t" + "Random Rt");
+                sb.Append("\t" + "Collision");
+                //sb.Append("Timepoints");
+                return sb.ToString();
+            }
         }
 
         public override string ToString()
@@ -291,6 +301,13 @@ namespace FlashLFQ
             sb.Append("" + (IsMbrPeak ? IntensityScore.ToString() : "") + "\t");
             sb.Append("" + (IsMbrPeak ? RtScore.ToString() : "") + "\t");
             sb.Append("" + (IsMbrPeak ? ScanCountScore.ToString() : "") + "\t");
+            sb.Append("" + (IsMbrPeak ? IsotopicEnvelopeScore.ToString() : "") + "\t");
+
+            sb.Append("" + (IsMbrPeak ? MassError.ToString() : "") + "\t");
+            sb.Append("" + (IsMbrPeak ? Math.Log2(Intensity).ToString() : "") + "\t");
+            sb.Append("" + (IsMbrPeak ? RtPredictionError.ToString() : "") + "\t");
+            sb.Append("" + (IsMbrPeak ? ScanCount.ToString() : "") + "\t");
+            sb.Append("" + ((IsMbrPeak && Apex?.PearsonCorrelation != null) ? Apex.PearsonCorrelation : "") + "\t");
 
             sb.Append("" + Identifications.Count + "\t");
             sb.Append("" + NumIdentificationsByBaseSeq + "\t");
