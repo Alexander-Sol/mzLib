@@ -43,7 +43,8 @@ namespace FlashLFQ.PEP
                 //targetCount = ChromatographicPeakDataGroups[i].Count(pda => pda.Label);
             }
 
-            TransformerChain<BinaryPredictionTransformer<Microsoft.ML.Calibrators.CalibratedModelParametersBase<Microsoft.ML.Trainers.FastTree.FastTreeBinaryModelParameters, Microsoft.ML.Calibrators.PlattCalibrator>>>[] trainedModels = new TransformerChain<BinaryPredictionTransformer<Microsoft.ML.Calibrators.CalibratedModelParametersBase<Microsoft.ML.Trainers.FastTree.FastTreeBinaryModelParameters, Microsoft.ML.Calibrators.PlattCalibrator>>>[numGroups];
+            TransformerChain<BinaryPredictionTransformer<Microsoft.ML.Calibrators.CalibratedModelParametersBase<Microsoft.ML.Trainers.FastTree.FastTreeBinaryModelParameters, Microsoft.ML.Calibrators.PlattCalibrator>>>[] trainedModels 
+                = new TransformerChain<BinaryPredictionTransformer<Microsoft.ML.Calibrators.CalibratedModelParametersBase<Microsoft.ML.Trainers.FastTree.FastTreeBinaryModelParameters, Microsoft.ML.Calibrators.PlattCalibrator>>>[numGroups];
 
             var trainer = mlContext.BinaryClassification.Trainers.FastTree(labelColumnName: "Label", featureColumnName: "Features", numberOfTrees: 400);
             var pipeline = mlContext.Transforms.Concatenate("Features", trainingVariables)
@@ -56,7 +57,8 @@ namespace FlashLFQ.PEP
             int groupNumber = 0;
             while (allSetsContainPositiveAndNegativeTrainingExamples == true && groupNumber < numGroups)
             {
-                if (ChromatographicPeakDataGroups[groupNumber].Where(p => p.Label == true).Count() == 0 || ChromatographicPeakDataGroups[groupNumber].Where(p => p.Label == false).Count() == 0)
+                if (ChromatographicPeakDataGroups[groupNumber].Where(p => p.Label == true).Count() == 0 
+                    || ChromatographicPeakDataGroups[groupNumber].Where(p => p.Label == false).Count() == 0)
                 {
                     allSetsContainPositiveAndNegativeTrainingExamples = false;
                 }
