@@ -73,7 +73,11 @@ namespace FlashLFQ.PEP
                     allGroupIndexes.RemoveAt(groupIndexNumber);
 
                     //concat doesn't work in a loop, therefore I had to hard code the concat to group 3 out of 4 lists. if the const int numGroups value is changed, then the concat has to be changed accordingly.
-                    IDataView dataView = mlContext.Data.LoadFromEnumerable(ChromatographicPeakDataGroups[allGroupIndexes[0]].Concat(ChromatographicPeakDataGroups[allGroupIndexes[1]].Concat(ChromatographicPeakDataGroups[allGroupIndexes[2]])));
+                    IDataView dataView = mlContext.Data.LoadFromEnumerable(
+                        ChromatographicPeakDataGroups[allGroupIndexes[0]]
+                        .Concat(ChromatographicPeakDataGroups[allGroupIndexes[1]]
+                        .Concat(ChromatographicPeakDataGroups[allGroupIndexes[2]])));
+
                     trainedModels[groupIndexNumber] = pipeline.Fit(dataView);
                     var myPredictions = trainedModels[groupIndexNumber].Transform(mlContext.Data.LoadFromEnumerable(ChromatographicPeakDataGroups[groupIndexNumber]));
                     CalibratedBinaryClassificationMetrics metrics = mlContext.BinaryClassification.Evaluate(data: myPredictions, labelColumnName: "Label", scoreColumnName: "Score");
@@ -198,7 +202,7 @@ namespace FlashLFQ.PEP
                             //Here we compute the pepvalue predection for each ambiguous peptide in a PSM. Ambiguous peptides with lower pepvalue predictions are removed from the PSM.
 
                             List<int> allBmpNotches = new List<int>();
-                            List<IBioPolymerWithSetMods> allBmpPeptides = new List<IBioPolymerWithSetMods>();
+                               List<IBioPolymerWithSetMods> allBmpPeptides = new List<IBioPolymerWithSetMods>();
 
 
                             ChromatographicPeakData pd = CreateOneChromatographicPeakDataEntry(peak, label: !peak.RandomRt) ;
