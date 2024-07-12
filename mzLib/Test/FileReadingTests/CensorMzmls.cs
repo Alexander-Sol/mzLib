@@ -204,9 +204,10 @@ namespace Test.FileReadingTests
 
             string mzmlFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\CalibrateSearch_4_19_24\Human_Calibrated_Files";
             MzSpectrum blankSpectrum = new MzSpectrum(mz: new double[] { 150 }, intensities: new double[] { 10000 }, false);
-            string outputFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHumanData";
+            string outputFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHumanData_7_11_24";
+            if(Directory.Exists(outputFolder) == false)
+                Directory.CreateDirectory(outputFolder);
             List<PsmFromTsv> censoredPsms = new();
-
 
             foreach (var kvp in psmsByFile)
             {
@@ -217,29 +218,28 @@ namespace Test.FileReadingTests
                    // If this file contains the top peptide instance, we can't remove it
                    .Where(psm => !peptideSequencesByFile[kvp.Key].Contains(psm.FullSequence) && psm.OrganismName.Equals("Homo sapiens") && psm.DecoyContamTarget == "T")
                    .GroupBy(psm => psm.FullSequence)
-                   .Where(group => allPeptideSeqs.Contains(group.Key) && group.Count() == 1)
                    .OrderBy(group => Guid.NewGuid()) // Order randomly, ensure different things are selected for each file
-                   .SelectMany(group => group.Take(1))
                    .Take(500)
                    .ToList();
-                censoredPsms.AddRange(psmsToRemove);
+                censoredPsms.AddRange(psmsToRemove.SelectMany(x => x));
 
                 // Open up the mzMl file specified by the psm FileName
                 // Select all scans referenced by the psms
                 // set the intensity of all peaks but 1 to zero
                 // Save the new mzMl file
-                string mzmlFullPath = Path.Combine(mzmlFolder, psmsToRemove.First().FileNameWithoutExtension + ".mzML");
+
+                string mzmlFullPath = Path.Combine(mzmlFolder, psmsToRemove.First().First().FileNameWithoutExtension + ".mzML");
                 var file = MsDataFileReader.GetDataFile(mzmlFullPath);
                 file.LoadAllStaticData();
 
-                foreach (var psm in psmsToRemove)
+                foreach (var psm in psmsToRemove.SelectMany(x => x))
                 {
                     MsDataScan scan = file.GetOneBasedScan(psm.Ms2ScanNumber);
                     scan.MassSpectrum = blankSpectrum;
                 }
 
                 MzmlMethods.CreateAndWriteMyMzmlWithCalibratedSpectra(file,
-                    Path.Combine(outputFolder, psmsToRemove.First().FileNameWithoutExtension + "-censored.mzML"),
+                    Path.Combine(outputFolder, psmsToRemove.First().First().FileNameWithoutExtension + "-censored.mzML"),
                     writeIndexed: true);
 
             }
