@@ -110,13 +110,14 @@ namespace Test.FileReadingTests
         [Test]
         public static void CensorGygiTwoProteomeData()
         {
-            string peptideFilePath = @"D:\GygiTwoProteome_PXD014415\Yeast_Human_Arabad_Contam_search\AllPeptides.psmtsv";
+
+            string peptideFilePath = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\MM105_7_17_24\Task2-SearchTask\AllPeptides.psmtsv";
             List<PsmFromTsv> parsedPeptides = SpectrumMatchTsvReader.ReadPsmTsv(peptideFilePath, out var warnings).Where(psm => psm.PEP_QValue < 0.001).ToList();
             HashSet<string> allPeptideSeqs = parsedPeptides.Select(pep => pep.FullSequence).ToHashSet();
             Assert.That(warnings.Count, Is.EqualTo(0));
             Assert.That(parsedPeptides.Count, Is.GreaterThan(100));
 
-            string psmFilePath = @"D:\GygiTwoProteome_PXD014415\Yeast_Human_Arabad_Contam_search\AllPSMs.psmtsv";
+            string psmFilePath = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\MM105_7_17_24\Task2-SearchTask\AllPSMs.psmtsv";
             List<PsmFromTsv> parsedPsms = SpectrumMatchTsvReader.ReadPsmTsv(psmFilePath, out warnings).Where(psm => psm.PEP_QValue < 0.01).ToList();
 
             var psmsByFile = parsedPsms.GroupBy(psm => psm.FileNameWithoutExtension).ToDictionary(group => group.Key, group => group.ToList());
@@ -129,11 +130,11 @@ namespace Test.FileReadingTests
             var psmHeaderDict = SpectrumMatchTsvReader.ParseHeader(File.ReadLines(psmFilePath).First());
             var psmHeaderString = string.Join('\t', psmHeaderDict.Select(kvp => kvp).OrderBy(kvp => kvp.Value).Select(kvp => kvp.Value));
 
-            string mzmlFolder = @"D:\GygiTwoProteome_PXD014415\MM105_Calibration_Search_MBR\Task1-CalibrateTask";
+            string mzmlFolder = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\MM105_7_17_24\Task1-CalibrateTask";
             MzSpectrum blankSpectrum = new MzSpectrum(mz: new double[] { 150 }, intensities: new double[] { 10000 }, false);
-            string outputFolder = @"D:\GygiTwoProteome_PXD014415\CensoredDataFiles";
+            string outputFolder = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\MM105_7_17_24\MetaMorpheusCensoredmzMLs";
+            Directory.CreateDirectory(outputFolder);
             List<PsmFromTsv> censoredPsms = new();
-
 
             foreach (var kvp in psmsByFile)
             {
