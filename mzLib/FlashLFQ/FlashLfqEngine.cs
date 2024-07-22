@@ -396,6 +396,88 @@ namespace FlashLFQ
             }
         }
 
+        public static List<(double mass, double abundance)> GetIsotopicDistribution(string modifiedSequence, string baseSequence, double monoisotopicMass)
+        {
+            // calculate averagine (used for isotopic distributions for unknown modifications)
+            double averageC = 4.9384;
+            double averageH = 7.7583;
+            double averageO = 1.4773;
+            double averageN = 1.3577;
+            double averageS = 0.0417;
+
+            double averagineMass =
+                PeriodicTable.GetElement("C").AverageMass * averageC +
+                PeriodicTable.GetElement("H").AverageMass * averageH +
+                PeriodicTable.GetElement("O").AverageMass * averageO +
+                PeriodicTable.GetElement("N").AverageMass * averageN +
+                PeriodicTable.GetElement("S").AverageMass * averageS;
+
+            // calculate monoisotopic masses and isotopic envelope for the base sequences
+            var isotopicMassesAndNormalizedAbundances = new List<(double mass, double abundance)>();
+
+            var formula = new ChemicalFormula();
+            if (baseSequence.AllSequenceResiduesAreValid())
+            {
+                // there are sometimes non-parsable sequences in the base sequence input
+                formula = new Proteomics.AminoAcidPolymer.Peptide(baseSequence).GetChemicalFormula();
+                double massDiff = monoisotopicMass;
+                massDiff -= formula.MonoisotopicMass;
+
+                if (Math.Abs(massDiff) > 20)
+                {
+                    double averagines = massDiff / averagineMass;
+
+                    formula.Add("C", (int)Math.Round(averagines * averageC, 0));
+                    formula.Add("H", (int)Math.Round(averagines * averageH, 0));
+                    formula.Add("O", (int)Math.Round(averagines * averageO, 0));
+                    formula.Add("N", (int)Math.Round(averagines * averageN, 0));
+                    formula.Add("S", (int)Math.Round(averagines * averageS, 0));
+                }
+            }
+            else
+            {
+                double averagines = monoisotopicMass / averagineMass;
+
+                formula.Add("C", (int)Math.Round(averagines * averageC, 0));
+                formula.Add("H", (int)Math.Round(averagines * averageH, 0));
+                formula.Add("O", (int)Math.Round(averagines * averageO, 0));
+                formula.Add("N", (int)Math.Round(averagines * averageN, 0));
+                formula.Add("S", (int)Math.Round(averagines * averageS, 0));
+            }
+            
+
+            var isotopicDistribution = IsotopicDistribution.GetDistribution(formula, 0.125, 1e-8);
+
+            double[] masses = isotopicDistribution.Masses.ToArray();
+            double[] abundances = isotopicDistribution.Intensities.ToArray();
+
+            for (int i = 0; i < masses.Length; i++)
+            {
+                masses[i] += (monoisotopicMass - formula.MonoisotopicMass);
+            }
+
+            double highestAbundance = abundances.Max();
+            int highestAbundanceIndex = Array.IndexOf(abundances, highestAbundance);
+
+            for (int i = 0; i < masses.Length; i++)
+            {
+                // expected isotopic mass shifts for this peptide
+                //masses[i] -= monoisotopicMass;
+
+                // normalized abundance of each isotope
+                abundances[i] /= highestAbundance;
+
+                // look for these isotopes
+                if (isotopicMassesAndNormalizedAbundances.Count < 3 || abundances[i] > 0.1)
+                {
+                    isotopicMassesAndNormalizedAbundances.Add((masses[i], abundances[i]));
+                }
+            }
+
+            var shifts = isotopicMassesAndNormalizedAbundances.OrderBy(i => i.mass).Take(3).ToList();
+            return shifts;
+        }
+
         /// <summary>
         /// Creates an ChromatographicPeak for each MS2 ID in a given file. Works by first
         /// finding every MS1 scan that neighbors the MS2 scan the ID originated from and that

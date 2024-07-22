@@ -34,7 +34,7 @@ namespace Readers.QuantificationResults
         public double PeptideMonoisotopicMass { get; set; }
 
         [Name("MS2 Retention Time")]
-        public double MS2RetentionTime { get; set; }
+        public double? MS2RetentionTime { get; set; }
 
         [Name("Precursor Charge")]
         public int PrecursorCharge { get; set; }
@@ -90,5 +90,18 @@ namespace Readers.QuantificationResults
         [Name("Peak Apex Mass Error (ppm)")]
         [TypeConverter(typeof(DashToNullOrDoubleConverter))]
         public double? PeakApexMassError { get; set; }
+
+        [Name("Random Rt")]
+        [TypeConverter(typeof(StringToBoolConverter))]
+        [Optional]
+        public bool RandomRt { get; set; }
+
+        [Ignore]
+        public double PeakRtDiff { get; set; }
+
+        public override string ToString()
+        {
+            return FullSequence + "; " + PeakCharge.ToString();
+        }
     }
 }

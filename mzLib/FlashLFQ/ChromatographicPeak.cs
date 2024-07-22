@@ -1,5 +1,6 @@
 ﻿using Chemistry;
 using MathNet.Numerics.Statistics;
+using Readers.QuantificationResults;
 using System;
 using System.Collections.Generic;
 using System.Linq;
