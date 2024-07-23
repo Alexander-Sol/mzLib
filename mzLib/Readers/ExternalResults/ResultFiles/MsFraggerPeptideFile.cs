@@ -29,7 +29,7 @@ namespace Readers
             {
                 var spectraCount = headers.Where(p => p.Contains("Spectral Count"))
                     .ToDictionary(p => p, p => headers.IndexOf(p));
-                var intensityCount = headers.Where(p => p.Contains("Intensity"))
+                var intensityCount = headers.Where(p => p.Contains("Intensity") && !p.Contains("LFQ"))
                     .ToDictionary(p => p, p => headers.IndexOf(p));
                 var results = new List<MsFraggerPeptide>();
                 bool readHeader = false;
