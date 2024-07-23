@@ -70,13 +70,14 @@ namespace Test.FileReadingTests
             var msmsPeaks = file.Where(peak => peak.FileName.Contains("Human_C18"))
                 .GroupBy(peak => peak.FileName)
                 .MaxBy(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
-                .Where(peak => peak.PeakMz != null && peak.PeakRTApex != null)
+                .Where(peak => peak.PeakMz != null && peak.PeakRTApex != null && peak.PeakDetectionType == "MSMS")
                 .OrderBy(peak => peak.PeakMz)
                 .ToList();
 
             Tolerance ppmTolerance = new PpmTolerance(10);
             List<List<QuantifiedPeak>> coelutingPeaks = new List<List<QuantifiedPeak>>();
 
+            HashSet<string> peptideSeqs = msmsPeaks.Select(msmsPeaks => msmsPeaks.FullSequence).ToHashSet();
             
             for (int i = 0; i < msmsPeaks.Count; i++)
             {
