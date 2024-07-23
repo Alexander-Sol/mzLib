@@ -96,6 +96,19 @@ namespace Readers.QuantificationResults
         [Optional]
         public bool RandomRt { get; set; }
 
+        [Name("Decoy Peptide")]
+        [TypeConverter(typeof(StringToBoolConverter))]
+        [Optional]
+        public bool DecoyPeptide { get; set; }
+
+        [Name("MBR Q-Value")]
+        [Optional]
+        public double? MbrQValue { get; set; }
+
+        [Name("Organism")]
+        [Optional]
+        public string Organism { get; set; }
+
         [Ignore]
         public double PeakRtDiff { get; set; }
 

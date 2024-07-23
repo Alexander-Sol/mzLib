@@ -64,21 +64,38 @@ namespace Test.FileReadingTests
         [Test]
         public static void LocalDataAnalysis()
         {
-            string inhousePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\Human_FlashLFQ_326_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
+            string inhousePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\Human_FlashLFQ_329_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
             QuantifiedPeakFile file = new QuantifiedPeakFile(inhousePath);
+
+            double fdrThreshold = 0.05;
 
             var msmsPeaks = file.Where(peak => peak.FileName.Contains("Human_C18"))
                 .GroupBy(peak => peak.FileName)
-                .MaxBy(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
-                .Where(peak => peak.PeakMz != null && peak.PeakRTApex != null && peak.PeakDetectionType == "MSMS")
+                //.MaxBy(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
+                .First(group => group.First().FileName.Contains("Human_C18_3mm_50msec_stnd-60min_2-calib"))
+                .Where(peak => peak.PeakMz != null && peak.PeakRTApex != null && !peak.DecoyPeptide && !peak.RandomRt
+                && (peak.PeakDetectionType == "MSMS") | (peak.PeakDetectionType == "MBR" && (peak.MbrQValue ?? 1) < fdrThreshold))
                 .OrderBy(peak => peak.PeakMz)
                 .ToList();
+
+            int mbrCount = msmsPeaks.Count(peak => peak.PeakDetectionType == "MBR");
+
+            int totalDecoyNumber = msmsPeaks.Count(peak => peak.RandomRt);
+
+            int humanCount = msmsPeaks.DistinctBy(peak => peak.FullSequence).Count(peak => peak.Organism.Contains("Homo"));
+            int ecoliDecoyCount = msmsPeaks.DistinctBy(peak => peak.FullSequence)
+                .Where(peak => peak.PeakDetectionType == "MBR" && !peak.Organism.Contains("Homo") & peak.Organism.Contains("coli"))
+                .Count(peak => peak.RandomRt);
+            int ecoliTargetCount = msmsPeaks.DistinctBy(peak => peak.FullSequence)
+                .Where(peak => !peak.Organism.Contains("Homo") & peak.Organism.Contains("coli"))
+                .Count(peak => !peak.RandomRt);
 
             Tolerance ppmTolerance = new PpmTolerance(10);
             List<List<QuantifiedPeak>> coelutingPeaks = new List<List<QuantifiedPeak>>();
 
             HashSet<string> peptideSeqs = msmsPeaks.Select(msmsPeaks => msmsPeaks.FullSequence).ToHashSet();
-            
+
+
             for (int i = 0; i < msmsPeaks.Count; i++)
             {
                 int j = i+1;
@@ -135,19 +152,13 @@ namespace Test.FileReadingTests
 
             Plotly.NET.CSharp.GenericChartExtensions.Show(combined);
 
-            Assert.That(file.Count(), Is.EqualTo(4));
-            Assert.That(file.CanRead(TestFilePath));
-
-            file = FileReader.ReadFile<QuantifiedPeakFile>(TestFilePath);
-            Assert.That(file.Count(), Is.EqualTo(4));
-            Assert.That(file.CanRead(TestFilePath));
         }
 
         [Test]
         public static void NperVizInhouse()
         {
-            string inhousePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\Human_FlashLFQ_326_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
-            string censoredPath = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHuman_FlashLFQ_323_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
+            string inhousePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\Human_FlashLFQ_329_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
+            string censoredPath = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHuman_FlashLFQ_329_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
 
             QuantifiedPeakFile file = new QuantifiedPeakFile(inhousePath);
             QuantifiedPeakFile censoredFile = new QuantifiedPeakFile(censoredPath);
@@ -157,7 +168,7 @@ namespace Test.FileReadingTests
             var originalFileMsmsPeaks = file.Where(peak => peak.FileName.Contains("Human_C18"))
                 .GroupBy(peak => peak.FileName)
                 .OrderByDescending(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
-                .Skip(1).Take(1)
+                .Take(1)
                 .SelectMany(group => group.Where(peak => peak.PeakMz != null && peak.PeakRTApex != null))
                 .OrderBy(peak => peak.PeakMz)
                 .ToList();
@@ -170,7 +181,7 @@ namespace Test.FileReadingTests
                 .Where(group => group.Count() > 1);
                 
 
-            string censoredPsms = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHumanData\CensoredPsms.psmtsv";
+            string censoredPsms = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHumanData_7_22_24_MM_NoOx\CensoredPsms.psmtsv";
             HashSet<string> censoredPeakSeqs = new();
             using (StreamReader reader = new(censoredPsms))
             {

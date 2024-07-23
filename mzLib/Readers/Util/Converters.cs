@@ -44,8 +44,8 @@ namespace Readers
         public override object ConvertFromString(string text, IReaderRow row, MemberMapData memberMapData)
         {
             return text == "1" 
-                | String.Compare(text, "true", StringComparison.OrdinalIgnoreCase) == 1 
-                | String.Compare(text, "t", StringComparison.OrdinalIgnoreCase) == 1;
+                | String.Compare(text, "true", StringComparison.OrdinalIgnoreCase) == 0 
+                | String.Compare(text, "t", StringComparison.OrdinalIgnoreCase) == 0;
         }
 
         public override string ConvertToString(object value, IWriterRow row, MemberMapData memberMapData)
