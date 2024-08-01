@@ -553,6 +553,153 @@ namespace Test
         }
 
         [Test]
+        public static void ReadInArabida()
+        {
+
+            DigestionParams digestionParams = new DigestionParams(
+                protease: "trypsin",
+                maxMissedCleavages: 2,
+                minPeptideLength: 7,
+                maxPeptideLength: 60,
+                initiatorMethionineBehavior: InitiatorMethionineBehavior.Variable);
+
+            var humanPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_HSapiens_80k_03_2024.fasta";
+            var ecoliPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_Ecoli_4k_03_2024.fasta";
+            var yeastPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_SCerevisiae_6k_03_2024.fasta";
+
+            var humanProteins = ProteinDbLoader.LoadProteinFasta(humanPath, generateTargets: true, DecoyType.None, false, out var errors);
+            var ecoliProteins = ProteinDbLoader.LoadProteinFasta(ecoliPath, generateTargets: true, DecoyType.None, false, out var errors2);
+            var yeastProteins = ProteinDbLoader.LoadProteinFasta(yeastPath, generateTargets: true, DecoyType.None, false, out var errors3);
+
+            HashSet<string> targetSequences = new();
+            int humanUniqueSequences = 0;
+            int ecoliUniqueSequences = 0;
+            int yeastUniqueSequences = 0;
+
+            foreach(var protein in humanProteins)
+            {
+                foreach(var peptide in protein.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    targetSequences.Add(peptide.FullSequence);
+                }
+                humanUniqueSequences = targetSequences.Count;
+            }
+
+            HashSet<string> ecoliSequences = new();
+            foreach (var protein in ecoliProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    targetSequences.Add(peptide.FullSequence);
+                }
+                ecoliUniqueSequences = ecoliSequences.Count;
+            }
+
+            HashSet<string> yeastSequences = new();
+            foreach (var protein in yeastProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    targetSequences.Add(peptide.FullSequence);
+                }
+                yeastUniqueSequences = yeastSequences.Count;
+            }
+
+
+            var arabidaProteins = ProteinDbLoader.LoadProteinFasta(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_Arabidopsis_40k_03_2024.fasta",
+                generateTargets: true, DecoyType.None, false, out var errors4);
+
+            int allAasRemoved = 0;
+            foreach(var arabidaProt in arabidaProteins)
+            {
+                HashSet<string> arabidopsisPeptides = arabidaProt.Digest(digestionParams, new List<Modification>(), new List<Modification>()).Select(p => p.FullSequence).ToHashSet();
+
+                int initialLength = arabidaProt.BaseSequence.Length;
+                foreach (string pep in arabidopsisPeptides.Where(targetSequences.Contains))
+                {
+                    arabidaProt.BaseSequence = arabidaProt.BaseSequence.Replace(pep, "");
+                }
+                int aasRemoved = initialLength - arabidaProt.BaseSequence.Length;
+                if(aasRemoved > 0)
+                {
+                    allAasRemoved += aasRemoved;
+                }
+            }
+           
+
+            ProteinDbWriter.WriteFastaDatabase(arabidaProteins, @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\Arabida_uniprot_03_24_homologousPepsRemoved.fasta", "|");
+
+        }
+
+        [Test]
+        public static void CountArabidopsisPeptides()
+        {
+            var digestionParams = new DigestionParams(
+                protease: "trypsin",
+                maxMissedCleavages: 2,
+                minPeptideLength: 7,
+                maxPeptideLength: 60,
+                initiatorMethionineBehavior: InitiatorMethionineBehavior.Variable);
+            var arabidaProteins = ProteinDbLoader.LoadProteinFasta(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\Arabida_uniprot_03_24_homologousPepsRemoved.fasta",
+                generateTargets: true, DecoyType.None, false, out var errors4);
+
+            ModificationMotif.TryGetMotif("M", out ModificationMotif motif);
+
+            Modification mod = new Modification(_originalId: "Oxidation", _target: motif, _locationRestriction: "Anywhere.",
+                _chemicalFormula: ChemicalFormula.ParseFormula("O"), _monoisotopicMass: GetElement("O").PrincipalIsotope.AtomicMass);
+            var variableMods = new List<Modification> { mod };
+
+
+            HashSet<string> arabidaFullSeqs = new();
+            foreach(var protein in arabidaProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), variableModifications: variableMods))
+                {
+                    arabidaFullSeqs.Add(peptide.FullSequence);
+                }
+            }
+            
+            using(StreamWriter writer = new StreamWriter(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\ArabidaPeptideCounts_homology_removed.txt"))
+            {
+                writer.WriteLine("Total arabidopsis peptides: " + arabidaFullSeqs.Count);
+            }
+        }
+
+        [Test]
+        public static void CountArabidopsisPeptidesUniprot()
+        {
+            var digestionParams = new DigestionParams(
+                protease: "trypsin",
+                maxMissedCleavages: 2,
+                minPeptideLength: 7,
+                maxPeptideLength: 60,
+                initiatorMethionineBehavior: InitiatorMethionineBehavior.Variable);
+            var arabidaProteins = ProteinDbLoader.LoadProteinFasta(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_Arabidopsis_40k_03_2024.fasta",
+                generateTargets: true, DecoyType.None, false, out var errors4);
+
+            ModificationMotif.TryGetMotif("M", out ModificationMotif motif);
+
+            Modification mod = new Modification(_originalId: "Oxidation", _target: motif, _locationRestriction: "Anywhere.",
+                _chemicalFormula: ChemicalFormula.ParseFormula("O"), _monoisotopicMass: GetElement("O").PrincipalIsotope.AtomicMass);
+            var variableMods = new List<Modification> { mod };
+
+
+            HashSet<string> arabidaFullSeqs = new();
+            foreach (var protein in arabidaProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), variableModifications: variableMods))
+                {
+                    arabidaFullSeqs.Add(peptide.FullSequence);
+                }
+            }
+
+            using (StreamWriter writer = new StreamWriter(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\ArabidaPeptideCounts_Uniprot40k.txt"))
+            {
+                writer.WriteLine("Total arabidopsis peptides: " + arabidaFullSeqs.Count);
+            }
+        }
+
+        [Test]
         public static void TestWhenFixedModIsSamePositionAsUniProtModWithDigestion()
         {
             var psiModDeserialized = Loaders.LoadPsiMod(Path.Combine(TestContext.CurrentContext.TestDirectory, "PSI-MOD.obo2.xml"));
