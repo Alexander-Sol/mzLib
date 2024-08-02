@@ -156,7 +156,7 @@ namespace Proteomics
         /// <summary>
         /// Base sequence, which may contain applied sequence variations.
         /// </summary>
-        public string BaseSequence { get; }
+        public string BaseSequence { get; set; }
 
         public string Organism { get; }
         public bool IsDecoy { get; }
