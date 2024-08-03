@@ -24,15 +24,15 @@ namespace Test.FileReadingTests
         [Test]
         public static void CensorKellyTwoProteomeData()
         {
-            string peptideFilePath = @"D:\Kelly_TwoProteomeData\NineFileSearch_MM105\Task1-SearchTask\AllPeptides.psmtsv";
-            List<PsmFromTsv> parsedPeptides = SpectrumMatchTsvReader.ReadPsmTsv(peptideFilePath, out var warnings).Where(psm => psm.PEP_QValue < 0.001)
+            string peptideFilePath = @"D:\Kelly_TwoProteomeData\MsConvertMzMls\MM_NewDecoys\Task1-SearchTask\AllPeptides.psmtsv";
+            List<PsmFromTsv> parsedPeptides = SpectrumMatchTsvReader.ReadPsmTsv(peptideFilePath, out var warnings).Where(psm => psm.PEP_QValue <= 0.001)
                 .Where(psm => !psm.FullSequence.Contains("xidation"))
                 .ToList();
             HashSet<string> allPeptideSeqs = parsedPeptides.Select(pep => pep.FullSequence).ToHashSet();
             Assert.That(warnings.Count, Is.EqualTo(0));
             Assert.That(parsedPeptides.Count, Is.GreaterThan(100));
 
-            string psmFilePath = @"D:\Kelly_TwoProteomeData\NineFileSearch_MM105\Task1-SearchTask\AllPSMs.psmtsv";
+            string psmFilePath = @"D:\Kelly_TwoProteomeData\MsConvertMzMls\MM_NewDecoys\Task1-SearchTask\AllPSMs.psmtsv";
             List<PsmFromTsv> parsedPsms = SpectrumMatchTsvReader.ReadPsmTsv(psmFilePath, out warnings)
                 .Where(psm => !psm.FullSequence.Contains("xidation"))
                 .Where(psm => psm.PEP_QValue < 0.01).ToList();
@@ -63,9 +63,9 @@ namespace Test.FileReadingTests
                     group => group.Key, 
                     group => group.Select(psm => psm.FullSequence).ToHashSet());
 
-            string mzmlFolder = @"D:\Kelly_TwoProteomeData\TenFile_NewDataMM105\Task1-CalibrateTask";
+            string mzmlFolder = @"D:\Kelly_TwoProteomeData\MsConvertMzMls\MetaMorpheusNewPepSearch\Task1-CalibrateTask";
             MzSpectrum blankSpectrum = new MzSpectrum(mz: new double[] { 150 }, intensities: new double[] { 10000 }, false);
-            string outputFolder = @"D:\Kelly_TwoProteomeData\CensoredDataFiles_7_22_24";
+            string outputFolder = @"D:\Kelly_TwoProteomeData\MsConvertMzMls\MM_Censored_8_2_24";
             if(!Directory.Exists(outputFolder))
                 Directory.CreateDirectory(outputFolder);
 
@@ -222,7 +222,7 @@ namespace Test.FileReadingTests
         [Test]
         public static void CensorInHouseHumanTwoProteomeData()
         {
-            string peptideFilePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\MM105_Human_Mixed\Task1-SearchTask\AllPeptides.psmtsv";
+            string peptideFilePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MMNewPep_CalSearch\Task2-SearchTask\AllPeptides.psmtsv";
             List<PsmFromTsv> parsedPeptides = SpectrumMatchTsvReader.ReadPsmTsv(peptideFilePath, out var warnings)
                 .Where(psm => !psm.FullSequence.Contains("xidation"))
                 .Where(psm => psm.PEP_QValue < 0.001).ToList();
@@ -230,7 +230,7 @@ namespace Test.FileReadingTests
             Assert.That(warnings.Count, Is.EqualTo(0));
             Assert.That(parsedPeptides.Count, Is.GreaterThan(100));
 
-            string psmFilePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\MM105_Human_Mixed\Task1-SearchTask\AllPSMs.psmtsv";
+            string psmFilePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MMNewPep_CalSearch\Task2-SearchTask\AllPSMs.psmtsv";
             List<PsmFromTsv> parsedPsms = SpectrumMatchTsvReader.ReadPsmTsv(psmFilePath, out warnings)
                 .Where(psm => !psm.FullSequence.Contains("xidation"))
                 .Where(psm => psm.PEP_QValue < 0.01).ToList();
@@ -261,9 +261,9 @@ namespace Test.FileReadingTests
             var psmHeaderDict = SpectrumMatchTsvReader.ParseHeader(File.ReadLines(psmFilePath).First());
             var psmHeaderString = string.Join('\t', psmHeaderDict.Select(kvp => kvp).OrderBy(kvp => kvp.Value).Select(kvp => kvp.Value));
 
-            string mzmlFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\CalibrateSearch_4_19_24\Human_Calibrated_Files";
+            string mzmlFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MMNewPep_CalSearch\Task1-CalibrateTask";
             MzSpectrum blankSpectrum = new MzSpectrum(mz: new double[] { 150 }, intensities: new double[] { 10000 }, false);
-            string outputFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHumanData_7_22_24_MM_NoOx";
+            string outputFolder = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MM_CensoredMzml_8_3_24";
             if(Directory.Exists(outputFolder) == false)
                 Directory.CreateDirectory(outputFolder);
             List<PsmFromTsv> censoredPsms = new();
