@@ -72,7 +72,7 @@ namespace Test.FileReadingTests
             var msmsPeaks = file.Where(peak => peak.FileName.Contains("Human_C18"))
                 .GroupBy(peak => peak.FileName)
                 //.MaxBy(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
-                .First(group => group.First().FileName.Contains("Human_C18_3mm_50msec_stnd-60min_2-calib"))
+                .First(group => group.First().FileName.Contains("04-12-24_Human_C18_3mm_50msec_stnd-60min_5-calib-censored"))
                 .Where(peak => peak.PeakMz != null && peak.PeakRTApex != null && !peak.DecoyPeptide && !peak.RandomRt
                 && (peak.PeakDetectionType == "MSMS") | (peak.PeakDetectionType == "MBR" && (peak.MbrQValue ?? 1) < fdrThreshold))
                 .OrderBy(peak => peak.PeakMz)
@@ -157,19 +157,18 @@ namespace Test.FileReadingTests
         [Test]
         public static void NperVizInhouse()
         {
-            string inhousePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\Human_FlashLFQ_329_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
-            string censoredPath = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHuman_FlashLFQ_329_DonorPepQ_0pt1\QuantifiedPeaks.tsv";
+            string inhousePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\Human_FlashLFQ_329_DonorPepQ_02_NewSearch\QuantifiedPeaks.tsv";
+            string censoredPath = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHuman_FlashLFQ_329_DonorPepQ_02_NewSearch\QuantifiedPeaks.tsv";
 
             QuantifiedPeakFile file = new QuantifiedPeakFile(inhousePath);
             QuantifiedPeakFile censoredFile = new QuantifiedPeakFile(censoredPath);
 
-
-
             var originalFileMsmsPeaks = file.Where(peak => peak.FileName.Contains("Human_C18"))
-                .GroupBy(peak => peak.FileName)
-                .OrderByDescending(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
-                .Take(1)
-                .SelectMany(group => group.Where(peak => peak.PeakMz != null && peak.PeakRTApex != null))
+                //.GroupBy(peak => peak.FileName)
+                //.OrderByDescending(group => group.Count(peak => peak.PeakDetectionType == "MSMS"))
+                //.Take(1)
+                .Where(peak => peak.FileName.Contains("Human_C18_3mm_50msec_stnd-60min_5"))
+                .Where(peak => peak.PeakMz != null && peak.PeakRTApex != null)
                 .OrderBy(peak => peak.PeakMz)
                 .ToList();
 
@@ -181,7 +180,7 @@ namespace Test.FileReadingTests
                 .Where(group => group.Count() > 1);
                 
 
-            string censoredPsms = @"D:\Human_Ecoli_TwoProteome_60minGradient\CensoredHumanData_7_22_24_MM_NoOx\CensoredPsms.psmtsv";
+            string censoredPsms = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MM_CensoredMzml_8_3_24\CensoredPsms.psmtsv";
             HashSet<string> censoredPeakSeqs = new();
             using (StreamReader reader = new(censoredPsms))
             {
@@ -227,10 +226,9 @@ namespace Test.FileReadingTests
                     
             }
 
-            string mzmlDirectory = @"D:\Human_Ecoli_TwoProteome_60minGradient\CalibrateSearch_4_19_24\Human_Calibrated_Files";
+            string mzmlDirectory = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MMNewPep_CalSearch\Task1-CalibrateTask";
             string mzmlPath = Path.Combine(mzmlDirectory, dataFile + ".mzML");
 
-            peakPairs.RemoveAt(0);
 
             PeakIndexingEngine indexingEngine = new();
             SpectraFileInfo fileInfo = new(mzmlPath, "A", 1, 1, 1);
