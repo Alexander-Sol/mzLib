@@ -28,6 +28,8 @@ namespace UsefulProteomicsDatabases
         /// </summary>
         Shuffle,
 
+        Entrapment,
+
         /// <summary>
         /// No clue... not implemented
         /// </summary>

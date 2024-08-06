@@ -846,7 +846,10 @@ namespace Proteomics
                         scrambledPeptideSequence = ScrambleSequence(peptideSequence, digestionParams.DigestionAgent.DigestionMotifs);
                         scrambleAttempts++;
                     }
-                    scrambledProteinSequence = scrambledProteinSequence.Replace(peptideSequence, scrambledPeptideSequence);
+                    if(scrambleAttempts <= 5)
+                        scrambledProteinSequence = scrambledProteinSequence.Replace(peptideSequence, scrambledPeptideSequence);
+                    else
+                        scrambledProteinSequence = scrambledProteinSequence.Replace(peptideSequence, "");
                 }
             }
 

@@ -641,6 +641,32 @@ namespace Test
             var yeastPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_SCerevisiae_6k_03_2024.fasta";
 
             var humanProteins = ProteinDbLoader.LoadProteinFasta(humanPath, generateTargets: true, DecoyType.None, false, out var errors);
+
+            foreach(var protein in humanProteins)
+            {
+                var scrambledSequence = Protein.ScrambleSequence(protein.BaseSequence, digestionParams.Protease.DigestionMotifs);
+
+                var entrapmentProtein = new Protein(
+                    scrambledSequence,
+                    "ENTRAPMENT_" + protein.Accession,
+                    protein.Organism,
+                    protein.GeneNames.ToList(),
+                    null,
+                    null,
+                    protein.Name,
+                    protein.FullName,
+                    true,
+                    protein.IsContaminant,
+                    null,
+                    null,
+                    null,
+                    protein.SampleNameForVariants,
+                    null,
+                    null,
+                    protein.DatabaseFilePath);
+            }
+
+
             var ecoliProteins = ProteinDbLoader.LoadProteinFasta(ecoliPath, generateTargets: true, DecoyType.None, false, out var errors2);
             var yeastProteins = ProteinDbLoader.LoadProteinFasta(yeastPath, generateTargets: true, DecoyType.None, false, out var errors3);
 
@@ -690,7 +716,7 @@ namespace Test
                 int initialLength = arabidaProt.BaseSequence.Length;
                 foreach (string pep in arabidopsisPeptides.Where(targetSequences.Contains))
                 {
-                    arabidaProt.BaseSequence = arabidaProt.BaseSequence.Replace(pep, "");
+                    //arabidaProt.BaseSequence = arabidaProt.BaseSequence.Replace(pep, "");
                 }
                 int aasRemoved = initialLength - arabidaProt.BaseSequence.Length;
                 if(aasRemoved > 0)
@@ -701,6 +727,114 @@ namespace Test
            
 
             ProteinDbWriter.WriteFastaDatabase(arabidaProteins, @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\Arabida_uniprot_03_24_homologousPepsRemoved.fasta", "|");
+
+        }
+
+        [Test]
+        public static void CreateHumanEntrapmentDb()
+        {
+
+            DigestionParams digestionParams = new DigestionParams(
+                protease: "trypsin",
+                maxMissedCleavages: 2,
+                minPeptideLength: 7,
+                maxPeptideLength: 60,
+                initiatorMethionineBehavior: InitiatorMethionineBehavior.Variable);
+
+            var humanPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_HSapiens_80k_03_2024.fasta";
+            var ecoliPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_Ecoli_4k_03_2024.fasta";
+            var yeastPath = @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_SCerevisiae_6k_03_2024.fasta";
+
+            var humanProteins = ProteinDbLoader.LoadProteinFasta(humanPath, generateTargets: true, DecoyType.None, false, out var errors);
+            List<Protein> entrapmentProteins = new();
+
+            foreach (var protein in humanProteins)
+            {
+                var scrambledSequence = Protein.ScrambleSequence(protein.BaseSequence, digestionParams.Protease.DigestionMotifs);
+
+                var entrapmentProtein = new Protein(
+                    scrambledSequence,
+                    "ENTRAPMENT_" + protein.Accession,
+                    protein.Organism + " ENTRAPMENT",
+                    protein.GeneNames.Select(g => new Tuple<string, string>(g.Item1 + " Entrapment", g.Item2 + " Entrapment")).ToList(),
+                    null,
+                    null,
+                    protein.Name + " ENTRAPMENT",
+                    protein.FullName + " ENTRAPMENT",
+                    true,
+                    protein.IsContaminant,
+                    null,
+                    null,
+                    null,
+                    protein.SampleNameForVariants,
+                    null,
+                    null,
+                    protein.DatabaseFilePath);
+
+                entrapmentProteins.Add(entrapmentProtein);
+            }
+
+
+            var ecoliProteins = ProteinDbLoader.LoadProteinFasta(ecoliPath, generateTargets: true, DecoyType.None, false, out var errors2);
+            var yeastProteins = ProteinDbLoader.LoadProteinFasta(yeastPath, generateTargets: true, DecoyType.None, false, out var errors3);
+
+            HashSet<string> targetSequences = new();
+            int humanUniqueSequences = 0;
+            int ecoliUniqueSequences = 0;
+            int yeastUniqueSequences = 0;
+
+            foreach (var protein in humanProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    targetSequences.Add(peptide.FullSequence);
+                }
+            }
+            humanUniqueSequences = targetSequences.Count;
+
+            HashSet<string> ecoliSequences = new();
+            foreach (var protein in ecoliProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    targetSequences.Add(peptide.FullSequence);
+                }
+                ecoliUniqueSequences = ecoliSequences.Count;
+            }
+
+            HashSet<string> yeastSequences = new();
+            foreach (var protein in yeastProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    targetSequences.Add(peptide.FullSequence);
+                }
+                yeastUniqueSequences = yeastSequences.Count;
+            }
+
+
+            int allAasRemoved = 0;
+            List<Protein> scrambledEntrapment = new();
+            HashSet<string> entrapments = new();
+            foreach (var entrapmentProt in entrapmentProteins)
+            {
+                int initialLength = entrapmentProt.BaseSequence.Length;
+
+                var scrambledProt = Protein.ScrambleDecoyProteinSequence(entrapmentProt, digestionParams, targetSequences);
+                
+                foreach (var peptide in scrambledProt.Digest(digestionParams, new List<Modification>(), new List<Modification>()))
+                {
+                    entrapments.Add(peptide.FullSequence);
+                }
+
+                scrambledEntrapment.Add(scrambledProt);
+
+                if (entrapments.Count >= humanUniqueSequences)
+                    break;
+            }
+
+
+            ProteinDbWriter.WriteFastaDatabase(scrambledEntrapment, @"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\HumanEntrapmentDb.fasta", "|");
 
         }
 
@@ -765,6 +899,8 @@ namespace Test
                 }
             }
 
+            HashSet<string> targetSeqs = new();
+
             var ecoliProteins = ProteinDbLoader.LoadProteinFasta(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\uniprot_Ecoli_4k_03_2024.fasta",
                 generateTargets: true, DecoyType.None, false, out var errors1);
             HashSet<string> ecoliFullSeqs = new();
@@ -773,6 +909,7 @@ namespace Test
                 foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), variableModifications: variableMods))
                 {
                     ecoliFullSeqs.Add(peptide.FullSequence);
+                    targetSeqs.Add(peptide.FullSequence);
                 }
             }
 
@@ -784,6 +921,7 @@ namespace Test
                 foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), variableModifications: variableMods))
                 {
                     humanFullSeqs.Add(peptide.FullSequence);
+                    targetSeqs.Add(peptide.FullSequence);
                 }
             }
 
@@ -795,13 +933,29 @@ namespace Test
                 foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), variableModifications: variableMods))
                 {
                     yeastFullSeqs.Add(peptide.FullSequence);
+                    targetSeqs.Add(peptide.FullSequence);
                 }
             }
 
 
-            using (StreamWriter writer = new StreamWriter(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\ArabidaPeptideCounts_homology_removed.txt"))
+            var entrapmentProteins = ProteinDbLoader.LoadProteinFasta(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\HumanEntrapmentDb.fasta",
+                generateTargets: true, DecoyType.None, false, out var errors5);
+            HashSet<string> entrapmentSeqs = new();
+            foreach (var protein in entrapmentProteins)
+            {
+                foreach (var peptide in protein.Digest(digestionParams, new List<Modification>(), variableModifications: variableMods))
+                {
+                    entrapmentSeqs.Add(peptide.FullSequence);
+                }
+            }
+
+            var entrapmentIntersect = entrapmentSeqs.Intersect(targetSeqs);
+
+            using (StreamWriter writer = new StreamWriter(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\Multi_Db_Peptide_Count.txt"))
             {
                 writer.WriteLine("Unique arabidopsis peptides (homologous peptides removed): " + arabidaFullSeqs.Count);
+                writer.WriteLine("Unique human entrapment peptides: " + entrapmentSeqs.Count);
+                writer.WriteLine("Intersecting entrapment peptides: " + entrapmentIntersect.Count());
                 writer.WriteLine("Unique human peptides: " + humanFullSeqs.Count);
                 writer.WriteLine("Unique yeast peptides: " + yeastFullSeqs.Count);
                 writer.WriteLine("Unique E. coli peptides: " + ecoliFullSeqs.Count);
