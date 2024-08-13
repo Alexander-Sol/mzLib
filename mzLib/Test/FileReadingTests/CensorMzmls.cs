@@ -327,7 +327,7 @@ namespace Test.FileReadingTests
 
             var peptideFile = new MsFraggerPeptideFile(peptideFilePath);
             peptideFile.LoadResults();
-            List<MsFraggerPeptide> parsedPeptides = peptideFile.Results;
+            List<MsFraggerPeptide> parsedPeptides = peptideFile.Results.Where(psm => !psm.FullSequence.Contains("M[")).ToList();
 
             var testPept = parsedPeptides.First();
 
@@ -356,10 +356,7 @@ namespace Test.FileReadingTests
             }
 
 
-
-
             placeholder += 1;
-            List<string> acceptorSamples = new List<string> { "A_3", "A_4", "A_5", "A_6", "A_7", "A_8", "A_9" };
             var expFile = new MsFraggerExperimentFile(@"D:\Kelly_TwoProteomeData\MsConvertMzMls\IonQuant_1Percent\experiment_annotation.tsv");
             List<MsFraggerExperiment> experiments = expFile.Results;
 
@@ -381,7 +378,7 @@ namespace Test.FileReadingTests
 
             List<MsFraggerPsm> censoredPsms = new();
 
-            string outputDir = @"D:\Kelly_TwoProteomeData\MsConvertMzMls\CensoredFiles_Fragger_7_22_24";
+            string outputDir = @"D:\Kelly_TwoProteomeData\MsConvertMzMls\CensoredFiles_Fragger_8_12_24";
             if (!Directory.Exists(outputDir))
                 Directory.CreateDirectory(outputDir);
 
