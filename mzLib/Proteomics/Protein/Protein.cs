@@ -207,7 +207,7 @@ namespace Proteomics
             var n = GeneNames.FirstOrDefault();
             string geneName = n == null ? "" : n.Item2;
 
-            return string.Format("mz|{0}|{1} {2} OS={3} GN={4}", Accession, Name, FullName, Organism, geneName);
+            return string.Format("tr|{0}|{1} {2} OS={3} OX=9606 GN={4}", Accession, Name, FullName, Organism, geneName);
         }
 
         /// <summary>

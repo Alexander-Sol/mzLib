@@ -271,7 +271,11 @@ namespace UsefulProteomicsDatabases
                 {
                     string header = delimeter == " " ? protein.GetEnsemblFastaHeader() : protein.GetUniProtFastaHeader();
                     writer.WriteLine(">" + header);
-                    writer.WriteLine(protein.BaseSequence);
+                    for(int i = 0; i < protein.BaseSequence.Length; i += 60)
+                    {
+                        int subStringLength = Math.Min(60, protein.BaseSequence.Length - i);
+                        writer.WriteLine(protein.BaseSequence.Substring(i, subStringLength));
+                    }
                 }
             }
         }
