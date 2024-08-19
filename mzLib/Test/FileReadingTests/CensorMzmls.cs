@@ -449,7 +449,8 @@ namespace Test.FileReadingTests
         [Test]
         public static void CensorFraggerGygi()
         {
-            string peptideFilePath = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\IonQuant_1Percent\combined_modified_peptide.tsv";
+            string basePath = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\IonQuant_1Percent_50PercentEntrapmentDb";
+            string peptideFilePath = Path.Combine(basePath, "combined_modified_peptide.tsv");
 
             var peptideFile = new MsFraggerPeptideFile(peptideFilePath);
             peptideFile.LoadResults();
@@ -481,27 +482,34 @@ namespace Test.FileReadingTests
             }
 
 
-            var expFile = new MsFraggerExperimentFile(@"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\IonQuant_1Percent\experiment_annotation.tsv");
+            var expFile = new MsFraggerExperimentFile(Path.Combine(basePath, "experiment_annotation.tsv"));
             List<MsFraggerExperiment> experiments = expFile.Results;
 
             HashSet<string> forbiddenSequences = new(); // These psms eluted twice in one run
 
             foreach (var exp in experiments)
             {
-                var psms = new MsFraggerPsmFile(Path.Combine(@"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\IonQuant_1Percent", exp.Sample, "psm.tsv"));
+                var psms = new MsFraggerPsmFile(Path.Combine(basePath, exp.Sample, "psm.tsv"));
                 psms.GroupBy(psm => psm.FullSequence).Where(group => group.Count() > 1).ToList().ForEach(group =>
                 {
                     double rtMin = group.Min(psm => psm.RetentionTime);
                     double rtMax = group.Max(psm => psm.RetentionTime);
                     if (rtMax - rtMin > 180) // fragger does RT by seconds, so this is a 3 minute diff
                     {
-                        forbiddenSequences.Add(group.Key);
+                        forbiddenSequences.Add(group.First().BaseSequence);
                     }
                 });
             }
 
+            using (StreamReader reader =
+                new StreamReader(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\EntrapmentProteinPeptideSequences_50percent.txt"))
+            {
+                forbiddenSequences.UnionWith(reader.ReadToEnd().Split('\n').Select(line => line.Trim()));
+            }
+
+
             List<MsFraggerPsm> censoredPsms = new();
-            string outputDir = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\CensoredFiles_Fragger_7_22_24";
+            string outputDir = @"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\CensoredFiles_Fragger_8_15_24";
             if (!Directory.Exists(outputDir))
                 Directory.CreateDirectory(outputDir);
 
@@ -514,14 +522,14 @@ namespace Test.FileReadingTests
             // for every psm in the group, censor the corresponding spectrum
             foreach (var exp in experiments.Where(exp => exp.FullFilePathWithExtension.Contains("_human_90min")))
             {
-                var psms = new MsFraggerPsmFile(Path.Combine(@"D:\GygiTwoProteome_PXD014415\MsConvertmzMLs\IonQuant_1Percent", exp.Sample, "psm.tsv"));
+                var psms = new MsFraggerPsmFile(Path.Combine(basePath, exp.Sample, "psm.tsv"));
 
                 var psmsToRemove = psms
                      .Where(pep => pep.Protein.Contains("HUMAN") && !pep.Protein.Contains("REV") && !pep.Protein.Contains("CON")
                         && pep.PeptideProphetProbability > 0.99
                         && !masterDonorPeptidesByFile[exp.Sample].Contains(pep.ModifiedSequence)
                         && !pep.ModifiedSequence.Contains("M[")
-                        && !forbiddenSequences.Contains(pep.ModifiedSequence))
+                        && !forbiddenSequences.Contains(pep.BaseSequence))
                     .GroupBy(pep => pep.ModifiedSequence)
                     .Where(group => group.Count() == 1)
                     .SelectMany(group => group)
@@ -572,7 +580,8 @@ namespace Test.FileReadingTests
         public static void CensorFraggerInHouseHuman()
             
         {
-            string peptideFilePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\IonQuant_1Percent_mzML\combined_modified_peptide.tsv";
+            string basePath = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\MzMls\IonQuant_1Percent_50PercentEntrapmentDb";
+            string peptideFilePath = Path.Combine(basePath, "combined_modified_peptide.tsv");
 
             var peptideFile = new MsFraggerPeptideFile(peptideFilePath);
             peptideFile.LoadResults();
@@ -605,16 +614,14 @@ namespace Test.FileReadingTests
                 }
             }
 
-            placeholder += 1;
-            List<string> acceptorSamples = new List<string> { "a_1", "a_2", "a_3", "a_4", "a_5", "a_6", "a_7", "a_8", "a_9", "a_10" };
-            var expFile = new MsFraggerExperimentFile(@"D:\Human_Ecoli_TwoProteome_60minGradient\IonQuant_1Percent_mzML\experiment_annotation.tsv");
+            var expFile = new MsFraggerExperimentFile(Path.Combine(basePath, "experiment_annotation.tsv"));
             List<MsFraggerExperiment> experiments = expFile.Results;
 
             HashSet<string> forbiddenSequences = new();
 
             foreach (var exp in experiments)
             {
-                var psms = new MsFraggerPsmFile(Path.Combine(@"D:\Human_Ecoli_TwoProteome_60minGradient\IonQuant_1Percent_mzML", exp.Sample, "psm.tsv"));
+                var psms = new MsFraggerPsmFile(Path.Combine(basePath, exp.Sample, "psm.tsv"));
                 psms.GroupBy(psm => psm.FullSequence).Where(group => group.Count() > 1).ToList().ForEach(group =>
                 {
                     double rtMin = group.Min(psm => psm.RetentionTime);
@@ -626,9 +633,15 @@ namespace Test.FileReadingTests
                 });
             }
 
+            using (StreamReader reader =
+                new StreamReader(@"C:\Users\Alex\Documents\Proteomes\MBR_Proteomes_March_2024\EntrapmentProteinPeptideSequences_50percent.txt"))
+            {
+                forbiddenSequences.UnionWith(reader.ReadToEnd().Split('\n').Select(line => line.Trim()));
+            }
+
             List<MsFraggerPsm> censoredPsms = new();
 
-            string outputDir = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\CensoredFiles_Fragger_7_22_24";
+            string outputDir = @"D:\Human_Ecoli_TwoProteome_60minGradient\RawData\CensoredFiles_Fragger_8_16_24";
             if (!Directory.Exists(outputDir))
                 Directory.CreateDirectory(outputDir);
 
@@ -642,7 +655,7 @@ namespace Test.FileReadingTests
             // for every psm in the group, censor the corresponding spectrum
             foreach (var exp in experiments.Where(exp => exp.FullFilePathWithExtension.Contains("Human_C18")))
             {
-                var psms = new MsFraggerPsmFile(Path.Combine(@"D:\Human_Ecoli_TwoProteome_60minGradient\IonQuant_1Percent_mzML", exp.Sample, "psm.tsv"));
+                var psms = new MsFraggerPsmFile(Path.Combine(basePath, exp.Sample, "psm.tsv"));
 
                 var psmsToRemove = psms
                      .Where(pep => pep.Protein.Contains("HUMAN") && !pep.Protein.Contains("REV") && !pep.Protein.Contains("CON")
@@ -678,8 +691,8 @@ namespace Test.FileReadingTests
                 string fileName = psmsToRemove.First().FileNameWithoutExtension;
 
                 MzmlMethods.CreateAndWriteMyMzmlWithCalibratedSpectra(file,
-                                       Path.Combine(outputDir, fileName + "-censored.mzML"),
-                                                          writeIndexed: true);
+                                      Path.Combine(outputDir, fileName + "-censored.mzML"),
+                                                         writeIndexed: true);
             }
 
             // Write out the list of censored PSMs 
