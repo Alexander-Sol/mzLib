@@ -51,5 +51,75 @@ namespace Readers
                 .WithSize(Width: 1000, Height: 500)
                 .Show();
         }
+
+        [Test]
+        public static void Ms1Example()
+        {
+            string mzmlPath = @"D:\Human_Ecoli_TwoProteome_60minGradient\CalibrateSearch_4_19_24\Human_Calibrated_Files\04-12-24_Human_C18_3mm_50msec_stnd-60min_1-calib.mzML";
+            var reader = MsDataFileReader.GetDataFile(mzmlPath);
+            reader.LoadAllStaticData();
+            var ms2Scans = reader.GetAllScansList().Where(scan => scan.MsnOrder == 1).ToList();
+            Tolerance tolerance = new PpmTolerance(20);
+            double[] rtArray = new double[ms2Scans.Count];
+            double[] intensityArray = new double[ms2Scans.Count];
+
+
+            var scan = ms2Scans[30 + ms2Scans.Count / 2];
+
+            //for (int i = 0; i < ms2Scans.Count; i++)
+            //{
+            //    rtArray[i] = ms2Scans[i].RetentionTime;
+            //    intensityArray[i] = 0;
+            //    int idx240 = ms2Scans[i].MassSpectrum.GetClosestPeakIndex(240.17);
+            //    if (!tolerance.Within(ms2Scans[i].MassSpectrum.XArray[idx240], 240.17)) continue;
+
+            //    int idx509 = ms2Scans[i].MassSpectrum.GetClosestPeakIndex(509.31);
+            //    if (!tolerance.Within(ms2Scans[i].MassSpectrum.XArray[idx509], 509.31)) continue;
+
+            //    intensityArray[i] = ms2Scans[i].MassSpectrum.YArray[idx240] + ms2Scans[i].MassSpectrum.YArray[idx509];
+            //}
+
+            Chart.Point<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
+                .WithTraceInfo("Diagnostic Ions")
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+                .WithSize(Width: 1000, Height: 500)
+                .Show();
+        }
+
+        [Test]
+        public static void Ms2LogExample()
+        {
+            string mzmlPath = @"D:\Human_Ecoli_TwoProteome_60minGradient\CalibrateSearch_4_19_24\Human_Calibrated_Files\04-12-24_Human_C18_3mm_50msec_stnd-60min_1-calib.mzML";
+            var reader = MsDataFileReader.GetDataFile(mzmlPath);
+            reader.LoadAllStaticData();
+            var ms2Scans = reader.GetAllScansList().Where(scan => scan.MsnOrder == 1).ToList();
+            Tolerance tolerance = new PpmTolerance(20);
+            double[] rtArray = new double[ms2Scans.Count];
+            double[] intensityArray = new double[ms2Scans.Count];
+
+
+            var scan = ms2Scans[30 + ms2Scans.Count / 2];
+
+            //for (int i = 0; i < ms2Scans.Count; i++)
+            //{
+            //    rtArray[i] = ms2Scans[i].RetentionTime;
+            //    intensityArray[i] = 0;
+            //    int idx240 = ms2Scans[i].MassSpectrum.GetClosestPeakIndex(240.17);
+            //    if (!tolerance.Within(ms2Scans[i].MassSpectrum.XArray[idx240], 240.17)) continue;
+
+            //    int idx509 = ms2Scans[i].MassSpectrum.GetClosestPeakIndex(509.31);
+            //    if (!tolerance.Within(ms2Scans[i].MassSpectrum.XArray[idx509], 509.31)) continue;
+
+            //    intensityArray[i] = ms2Scans[i].MassSpectrum.YArray[idx240] + ms2Scans[i].MassSpectrum.YArray[idx509];
+            //}
+
+            Chart.Bar<double, double, string>(scan.MassSpectrum.XArray.Select(x => Math.Log(x)), scan.MassSpectrum.YArray)
+                .WithTraceInfo("Diagnostic Ions")
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+                .WithSize(Width: 1000, Height: 500)
+                .Show();
+        }
     }
 }
