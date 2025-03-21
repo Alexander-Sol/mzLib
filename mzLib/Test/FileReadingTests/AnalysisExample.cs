@@ -13,8 +13,10 @@ using Proteomics.AminoAcidPolymer;
 using Readers;
 using Stopwatch = System.Diagnostics.Stopwatch;
 using Plotly.NET.CSharp;
+using Test.FileReadingTests;
+using UsefulProteomicsDatabases;
 
-namespace Readers
+namespace Test.FileReadingTests
 {
     [TestFixture]
     internal class AnalysisExample
@@ -50,6 +52,62 @@ namespace Readers
                 .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity of Diagnostic Ions"))
                 .WithSize(Width: 1000, Height: 500)
                 .Show();
+        }
+
+        [Test]
+        public static void GetIsoEnv()
+        {
+            string histoneSeq = "MPEPAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSVYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK";
+
+            ChemicalFormula cf = new Peptide(histoneSeq).GetChemicalFormula();
+            IsotopicDistribution dist = IsotopicDistribution.GetDistribution(cf, 0.125, 1e-8);
+            double[] mz = dist.Masses.Select(v => v.ToMz(20)).ToArray();
+            double[] intensities = dist.Intensities.Select(v => v * 100).ToArray();
+            double rt = 1;
+
+            ChemicalFormula methyl = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("CH2"), cf } );
+            ChemicalFormula acetyl = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("C2H2O"), cf });
+            ChemicalFormula phospho = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("PO4H3"), cf });
+
+
+
+
+            double[] plotMz = new double[mz.Length * 3];
+            double[] plotIntensity = new double[mz.Length * 3];
+
+            for (int i = 0; i < mz.Length; i++)
+            {
+                int first = (3 * i);
+                int second = (3 * i + 1);
+                int third = (3 * i + 2);
+
+                plotMz[first] = mz[i] - 0.00001;
+                plotIntensity[first] = 0;
+
+                plotMz[second] = mz[i];
+                plotIntensity[second] = intensities[i];
+
+                plotMz[third] = mz[i] + 0.00001;
+                plotIntensity[third] = 0;
+            }
+            
+
+            // add the scan
+            MsDataScan scan = new MsDataScan(massSpectrum: new MzSpectrum(plotMz, plotIntensity, false), oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: rt, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: intensities.Sum(), injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1));
+
+            Chart.Line<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
+                .WithTraceInfo("Theoretical Envelope")
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+                .WithSize(Width: 1000, Height: 500)
+                .Show();
+
+
+
+
+
         }
 
         [Test]
