@@ -226,7 +226,7 @@ namespace Readers
                 centroidedResults.Mzs,
                 centroidedResults.Intensities,
                 filteringParams,
-                msnLevel: 2);
+                msnLevel: 1);
         }
 
         /// <summary>

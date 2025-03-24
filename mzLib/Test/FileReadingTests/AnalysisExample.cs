@@ -15,6 +15,7 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 using Plotly.NET.CSharp;
 using Test.FileReadingTests;
 using UsefulProteomicsDatabases;
+using Easy.Common.Extensions;
 
 namespace Test.FileReadingTests
 {
@@ -65,12 +66,6 @@ namespace Test.FileReadingTests
             double[] intensities = dist.Intensities.Select(v => v * 100).ToArray();
             double rt = 1;
 
-            ChemicalFormula methyl = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("CH2"), cf } );
-            ChemicalFormula acetyl = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("C2H2O"), cf });
-            ChemicalFormula phospho = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("PO4H3"), cf });
-
-
-
 
             double[] plotMz = new double[mz.Length * 3];
             double[] plotIntensity = new double[mz.Length * 3];
@@ -104,11 +99,120 @@ namespace Test.FileReadingTests
                 .WithSize(Width: 1000, Height: 500)
                 .Show();
 
-
-
-
-
         }
+
+
+        [Test]
+        public static void GetCombinedIsoEnv()
+        {
+            string histoneSeq = "MPEPAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSVYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK";
+
+            int baseScalingFactor = 100000;
+            int modScalingFactor = 25000;
+            //int z = 30;
+
+            ChemicalFormula cf = new Peptide(histoneSeq).GetChemicalFormula();
+            IsotopicDistribution dist = IsotopicDistribution.GetDistribution(cf, 0.125, 1e-8);
+            
+            ChemicalFormula methyl = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("CH2"), cf });
+            ChemicalFormula acetyl = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("C2H2O"), cf });
+            ChemicalFormula phospho = ChemicalFormula.Combine(new List<ChemicalFormula> { ChemicalFormula.ParseFormula("PO4H3"), cf });
+
+            IsotopicDistribution distMethyl = IsotopicDistribution.GetDistribution(methyl, 0.125, 1e-8);
+            IsotopicDistribution distAcetyl = IsotopicDistribution.GetDistribution(acetyl, 0.125, 1e-8);
+            IsotopicDistribution distPhospho = IsotopicDistribution.GetDistribution(phospho, 0.125, 1e-8);
+
+            List<ChemicalFormula> chemicalFormulas = new List<ChemicalFormula> { cf, methyl, acetyl, phospho };
+            List<IsotopicDistribution> isoDistributions = chemicalFormulas.Select(cf => IsotopicDistribution.GetDistribution(cf, 0.125, 1e-8)).ToList();
+
+            List<double[]> mzArrayList = new();
+            List<int[]> intensityArrayList = new();
+
+            for(int z = 25; z < 36; z++)
+            {
+                int chargeStateScalingFactor = 6 - Math.Abs(z - 30);
+
+                // unmodified
+                mzArrayList.Add(dist.Masses.Select(v => v.ToMz(z)).ToArray());
+                intensityArrayList.Add(dist.Intensities.Select(v => (int)(v * baseScalingFactor * chargeStateScalingFactor)).ToArray());
+
+                // methyl
+                mzArrayList.Add(distMethyl.Masses.Select(v => v.ToMz(z)).ToArray());
+                intensityArrayList.Add(distMethyl.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
+
+                // acetyl
+                mzArrayList.Add(distAcetyl.Masses.Select(v => v.ToMz(z)).ToArray());
+                intensityArrayList.Add(distAcetyl.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
+
+                //phospho
+                mzArrayList.Add(distPhospho.Masses.Select(v => v.ToMz(z)).ToArray());
+                intensityArrayList.Add(distPhospho.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
+            }
+
+            //double[] mz = dist.Masses.Select(v => v.ToMz(z)).ToArray();
+            //int[] intensities = dist.Intensities.Select(v => (int)(v * baseScalingFactor)).ToArray();
+            //double rt = 1;
+
+            //double[] mzMethyl = distMethyl.Masses.Select(v => v.ToMz(z)).ToArray();
+            //int[] intensitiesMethyl = distMethyl.Intensities.Select(v => (int)(v * modScalingFactor)).ToArray();
+
+            //double[] mzAcetyl = distAcetyl.Masses.Select(v => v.ToMz(z)).ToArray();
+            //int[] intensitiesAcetyl = distAcetyl.Intensities.Select(v => (int)(v * modScalingFactor)).ToArray();
+
+            //double[] mzPhospho = distPhospho.Masses.Select(v => v.ToMz(z)).ToArray();
+            //int[] intensitiesPhospho = distPhospho.Intensities.Select(v => (int)(v * modScalingFactor)).ToArray();
+
+            var displaySpectrum = TofSpectraMerger.MergeArraysToMs2Spectrum(mzArrayList, intensityArrayList, ppmTolerance: 5);
+
+
+            double[] plotMz = new double[displaySpectrum.Size * 3];
+            double[] plotIntensity = new double[displaySpectrum.Size * 3];
+
+            for (int i = 0; i < displaySpectrum.Size; i++)
+            {
+                int first = (3 * i);
+                int second = (3 * i + 1);
+                int third = (3 * i + 2);
+
+                plotMz[first] = displaySpectrum.XArray[i] - 0.00001;
+                plotIntensity[first] = 0;
+
+                plotMz[second] = displaySpectrum.XArray[i];
+                plotIntensity[second] = displaySpectrum.YArray[i];
+
+                plotMz[third] = displaySpectrum.XArray[i] + 0.00001;
+                plotIntensity[third] = 0;
+            }
+
+            MsDataScan[] scans = new MsDataScan[1];
+
+            // add the scan
+            scans[0] = new MsDataScan(massSpectrum: new MzSpectrum(plotMz, plotIntensity, false), oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 465.5, isolationWidth: 4);
+
+            var myMsDataFile = new FakeMsDataFile(scans);
+            MsDataScan scan = myMsDataFile.GetAllScansList()[0];
+
+            DeconvolutionParameters deconParams = new ClassicDeconvolutionParameters(1, 60, 4, 3);
+
+            var precursors = scan.GetIsolatedMassesAndCharges(scan.MassSpectrum, deconParams).ToList();
+
+            var deconvolutedMonoisotopicMasses = precursors.Select(p => p.MonoisotopicMass).OrderBy(d => d).ToList();
+            var actualMonoisotopicMasses = chemicalFormulas.Select(cf => cf.MonoisotopicMass).OrderBy(d => d).ToList();
+
+            Console.WriteLine("Ground truth monoisotopic masses: " + String.Join(", ", actualMonoisotopicMasses));
+            Console.WriteLine("Deconvoluted monoisotopic masses: " + String.Join(", ", deconvolutedMonoisotopicMasses));
+
+            Chart.Line<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
+                .WithTraceInfo("Theoretical Envelope")
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+                .WithSize(Width: 1000, Height: 500)
+                .Show();
+        }
+
 
         [Test]
         public static void Ms1Example()
