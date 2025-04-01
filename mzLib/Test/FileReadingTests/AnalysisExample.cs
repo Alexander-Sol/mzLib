@@ -2,8 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
-using System.Xml.Serialization;
 using Chemistry;
 using MassSpectrometry;
 using MzIdentML;
@@ -13,9 +11,6 @@ using Proteomics.AminoAcidPolymer;
 using Readers;
 using Stopwatch = System.Diagnostics.Stopwatch;
 using Plotly.NET.CSharp;
-using Test.FileReadingTests;
-using UsefulProteomicsDatabases;
-using Easy.Common.Extensions;
 using MathNet.Numerics.Distributions;
 
 namespace Test.FileReadingTests
@@ -106,7 +101,7 @@ namespace Test.FileReadingTests
         [Test]
         public static void GetCombinedIsoEnv()
         {
-            string histoneSeq = "MPEPAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSVYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSAK";
+            string histoneSeq = "PEPAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSIYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIAGEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSSK";
 
             int baseScalingFactor = 75000;
             int modScalingFactor = 25000;
@@ -134,55 +129,31 @@ namespace Test.FileReadingTests
             List<double[]> mzArrayList = new();
             List<int[]> intensityArrayList = new();
 
+            Random randomScaling = new();
+
             for(int z = 25; z < 36; z++)
             {
                 int chargeStateScalingFactor = 6 - Math.Abs(z - 30);
+                double randomScalingFactor = randomScaling.NextDouble() * 0.2 + 0.9;
 
                 // unmodified
                 mzArrayList.Add(dist.Masses.Select(v => v.ToMz(z)).ToArray());
-                intensityArrayList.Add(dist.Intensities.Select(v => (int)(v * baseScalingFactor * chargeStateScalingFactor)).ToArray());
+                intensityArrayList.Add(dist.Intensities.Select(v => (int)(v * baseScalingFactor * chargeStateScalingFactor * randomScalingFactor)).ToArray());
 
                 foreach(var distribution in isoDistributions)
                 {
+                    randomScalingFactor = randomScaling.NextDouble() * 0.2 + 0.9;
                     mzArrayList.Add(distribution.Masses.Select(v => v.ToMz(z)).ToArray());
-                    intensityArrayList.Add(distribution.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
+                    intensityArrayList.Add(distribution.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor * randomScalingFactor)).ToArray());
                 }
-
-                //// methyl
-                //mzArrayList.Add(distMethyl.Masses.Select(v => v.ToMz(z)).ToArray());
-                //intensityArrayList.Add(distMethyl.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
-
-                //// acetyl
-                //mzArrayList.Add(distAcetyl.Masses.Select(v => v.ToMz(z)).ToArray());
-                //intensityArrayList.Add(distAcetyl.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
-
-                ////phospho
-                //mzArrayList.Add(distPhospho.Masses.Select(v => v.ToMz(z)).ToArray());
-                //intensityArrayList.Add(distPhospho.Intensities.Select(v => (int)(v * modScalingFactor * chargeStateScalingFactor)).ToArray());
             }
 
             var noiseParams = new LowFrequencyNoiseParameters(peakNumberLimitLow:5999, peakNumberLimitHigh: 6000, 
                 peakLocationLimitLow: 390, peakLocationLimitHigh: 575, peakIntensityLimitHigh: 1500);
 
-
-            
-
             var lowFreqNoiseSpectrum = SimulatedData.BuildLowFrequencyNoiseSpectrum(noiseParams);
             mzArrayList.Add(lowFreqNoiseSpectrum.XArray);
             intensityArrayList.Add(lowFreqNoiseSpectrum.YArray.Select(d => (int)d).ToArray());
-
-            //double[] mz = dist.Masses.Select(v => v.ToMz(z)).ToArray();
-            //int[] intensities = dist.Intensities.Select(v => (int)(v * baseScalingFactor)).ToArray();
-            //double rt = 1;
-
-            //double[] mzMethyl = distMethyl.Masses.Select(v => v.ToMz(z)).ToArray();
-            //int[] intensitiesMethyl = distMethyl.Intensities.Select(v => (int)(v * modScalingFactor)).ToArray();
-
-            //double[] mzAcetyl = distAcetyl.Masses.Select(v => v.ToMz(z)).ToArray();
-            //int[] intensitiesAcetyl = distAcetyl.Intensities.Select(v => (int)(v * modScalingFactor)).ToArray();
-
-            //double[] mzPhospho = distPhospho.Masses.Select(v => v.ToMz(z)).ToArray();
-            //int[] intensitiesPhospho = distPhospho.Intensities.Select(v => (int)(v * modScalingFactor)).ToArray();
 
             var displaySpectrum = TofSpectraMerger.MergeArraysToMs2Spectrum(mzArrayList, intensityArrayList, ppmTolerance: 5);
 
@@ -196,7 +167,7 @@ namespace Test.FileReadingTests
             scans[0] = new MsDataScan(massSpectrum: displaySpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
                 polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
                 mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
-                isolationMZ: 465.5, isolationWidth: 4);
+                isolationMZ: 462, isolationWidth: 4);
 
             var myMsDataFile = new FakeMsDataFile(scans);
             MsDataScan scan = myMsDataFile.GetAllScansList()[0];
@@ -212,13 +183,6 @@ namespace Test.FileReadingTests
             Console.WriteLine("Deconvoluted monoisotopic masses:\n" + String.Join("\n", deconvolutedMonoisotopicMasses));
 
             PlotSpectrum(displaySpectrum.XArray, displaySpectrum.YArray);
-
-            //Chart.Line<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
-            //    .WithTraceInfo("Theoretical Envelope")
-            //    .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
-            //    .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
-            //    .WithSize(Width: 1000, Height: 500)
-            //    .Show();
         }
 
 

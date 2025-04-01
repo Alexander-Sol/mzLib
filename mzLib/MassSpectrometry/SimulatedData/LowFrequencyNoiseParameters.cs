@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace MassSpectrometry
+﻿namespace MassSpectrometry
 {
     // <summary>
     /// Used with adding low frequency noise to objects derived from the SimulatedData class. 

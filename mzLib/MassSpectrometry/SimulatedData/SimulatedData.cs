@@ -13,7 +13,7 @@ namespace MassSpectrometry
     /// Abstract class from which all simulated data objects can be derived. Provides methods for adding high frequency noise, low frequency noise, and operators
     /// to add, subtract, or multiply classes derived from SimulatedData and other SImulatedData objects or scalar values. 
     /// </summary>
-    public abstract class SimulatedData
+    public class SimulatedData
     {
         /// <summary>
         /// m/z array. 
@@ -105,7 +105,7 @@ namespace MassSpectrometry
         {
             for(int i = 0; i < inputArray.Length; i++)
             {
-                inputArray[i] = inputArray[i] + noiseDistribution.Sample();
+                inputArray[i] = Math.Abs(inputArray[i] + noiseDistribution.Sample());
             }
         }
 
