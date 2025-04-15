@@ -158,6 +158,7 @@ namespace FlashLFQ
                 sb.Append("Peak Apex Mass Error (ppm)" + "\t");
                 sb.Append("Decoy Peptide" + "\t");
                 sb.Append("Random RT");
+                sb.Append("\tBest_Matching_Sequence");
                 return sb.ToString();
             }
         }
@@ -249,6 +250,7 @@ namespace FlashLFQ
             sb.Append(MassError.ToString(CultureInfo.InvariantCulture) + "\t");
             sb.Append( DecoyPeptide.ToString(CultureInfo.InvariantCulture) + "\t");
             sb.Append("False"); // Because this isn't an MBR peak, the Random RT Field will always be false
+            sb.Append("\t" + Identifications.OrderByDescending(i => i.PsmScore).ThenBy(i => i.QValue).First().ModifiedSequence);
 
             return sb.ToString();
         }

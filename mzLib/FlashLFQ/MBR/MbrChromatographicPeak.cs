@@ -94,6 +94,7 @@ namespace FlashLFQ
             sb.Append(MassError.ToString(CultureInfo.InvariantCulture) + "\t");
             sb.Append(DecoyPeptide.ToString(CultureInfo.InvariantCulture) + "\t");
             sb.Append(RandomRt); // Because this isn't an MBR peak, the Random RT Field will always be false
+            sb.Append("\t" + Identifications.First().ModifiedSequence);
 
             return sb.ToString();
         }
