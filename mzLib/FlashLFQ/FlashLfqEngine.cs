@@ -1676,6 +1676,7 @@ namespace FlashLFQ
                 if (CheckIsotopicEnvelopeCorrelation(massShiftToIsotopePeaks, peak, chargeState, isotopeTolerance, spectraFile, out var pearsonCorr))
                 {
                     IIndexedMzPeak mostIntensePeakWithReasonableCorr = null;
+                    double experimentalIntensityMax = zeroShiftPeaks.Max(p => p.Intensity);
                     // impute unobserved isotope peak intensities
                     // TODO: Figure out why value imputation is performed. Build a toggle?
                     for (int i = 0; i < experimentalIsotopeIntensities.Length; i++)
@@ -1685,16 +1686,19 @@ namespace FlashLFQ
                         {
                             experimentalIsotopeIntensities[i] = theoreticalIsotopeAbundances[i] * experimentalIsotopeIntensities[peakfindingMassIndex];
                         }
+                        else
+                        {
+                            double theoreticalExperimentalRatio = (experimentalIsotopeIntensities[i] / experimentalIntensityMax) / theoreticalIsotopeAbundances[i];
+                            if (1.5 > theoreticalExperimentalRatio && theoreticalExperimentalRatio > 0.66 && 
+                                (mostIntensePeakWithReasonableCorr == null || experimentalIsotopeIntensities[i] > mostIntensePeakWithReasonableCorr.Intensity))
+                            {
+                                mostIntensePeakWithReasonableCorr = zeroShiftPeaks.MinBy(p => Math.Abs(p.Intensity - experimentalIsotopeIntensities[i]));
+                            }
 
-                        // check that the correlation is reasonable, +/- 50%
-                        // if it is, store that peak as the most intense peak
+                        }
                     }
 
-                    var orderedPeaks = zeroShiftPeaks.OrderBy(p => p.Mz).ToList();
-                    int indexOfMostAbundantPeak = orderedPeaks.IndexOf(peak);
-
-
-                    isotopicEnvelopes.Add(new IsotopicEnvelope(zeroShiftPeaks.MaxBy(p => p.Intensity), chargeState, experimentalIsotopeIntensities.Sum(), pearsonCorr));
+                    isotopicEnvelopes.Add(new IsotopicEnvelope(mostIntensePeakWithReasonableCorr ?? peak, chargeState, experimentalIsotopeIntensities.Sum(), pearsonCorr));
                 }
             }
 
