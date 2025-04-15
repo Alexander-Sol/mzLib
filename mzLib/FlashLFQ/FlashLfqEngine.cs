@@ -1614,6 +1614,8 @@ namespace FlashLFQ
             foreach (IIndexedMzPeak peak in xic)
             {
                 Array.Clear(experimentalIsotopeIntensities, 0, experimentalIsotopeIntensities.Length);
+                zeroShiftPeaks.Clear();
+                zeroShiftPeaks.Add(peak);
                 foreach (var kvp in massShiftToIsotopePeaks)
                 {
                     kvp.Value.Clear();
@@ -1673,15 +1675,24 @@ namespace FlashLFQ
                 // Check that the experimental envelope matches the theoretical
                 if (CheckIsotopicEnvelopeCorrelation(massShiftToIsotopePeaks, peak, chargeState, isotopeTolerance, spectraFile, out var pearsonCorr))
                 {
+                    IIndexedMzPeak mostIntensePeakWithReasonableCorr = null;
                     // impute unobserved isotope peak intensities
                     // TODO: Figure out why value imputation is performed. Build a toggle?
                     for (int i = 0; i < experimentalIsotopeIntensities.Length; i++)
                     {
+                        // If the peak is not present, we need to impute the intensity
                         if (experimentalIsotopeIntensities[i] == 0)
                         {
                             experimentalIsotopeIntensities[i] = theoreticalIsotopeAbundances[i] * experimentalIsotopeIntensities[peakfindingMassIndex];
                         }
+
+                        // check that the correlation is reasonable, +/- 50%
+                        // if it is, store that peak as the most intense peak
                     }
+
+                    var orderedPeaks = zeroShiftPeaks.OrderBy(p => p.Mz).ToList();
+                    int indexOfMostAbundantPeak = orderedPeaks.IndexOf(peak);
+
 
                     isotopicEnvelopes.Add(new IsotopicEnvelope(zeroShiftPeaks.MaxBy(p => p.Intensity), chargeState, experimentalIsotopeIntensities.Sum(), pearsonCorr));
                 }
