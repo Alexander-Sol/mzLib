@@ -1,15 +1,13 @@
 ﻿using NUnit.Framework;
 using Assert = NUnit.Framework.Legacy.ClassicAssert;
-using Proteomics.PSM;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Omics.Fragmentation;
-using Omics.SpectrumMatch;
-using Proteomics;
 using Readers;
+using MzLibUtil;
 
 namespace Test.FileReadingTests
 {
@@ -22,6 +20,8 @@ namespace Test.FileReadingTests
         [TestCase("oglycoSinglePsms.psmtsv", 2)] // oglyco
         [TestCase("nglyco_f5.psmtsv", 5)] // nglyco
         [TestCase("VariantCrossTest.psmtsv", 15)] // variant crossing
+        [TestCase("XL_Intralinks.tsv", 6)] // variant crossing
+        [TestCase("XLink.psmtsv", 19)] // variant crossing
         public static void TestPsmReaderWithMultipleEntryPoints(string path, int expected)
         {
             string psmFilePath = Path.Combine(TestContext.CurrentContext.TestDirectory, @"FileReadingTests\SearchResults",
@@ -62,9 +62,10 @@ namespace Test.FileReadingTests
         }
 
         [Test]
-        public static void ReadOGlycoPsmsLocalizedGlycans()
+        [TestCase(@"FileReadingTests\SearchResults\oglyco.psmtsv")]
+        [TestCase(@"FileReadingTests\SearchResults\oglycoWithWrongExtension.tsv")]
+        public static void ReadOGlycoPsmsLocalizedGlycans(string psmFile)
         {
-            string psmFile = @"FileReadingTests\SearchResults\oglyco.psmtsv";
             List<PsmFromTsv> parsedPsms = SpectrumMatchTsvReader.ReadPsmTsv(psmFile, out var warnings);
             Assert.AreEqual(9, parsedPsms.Count);
 
@@ -76,7 +77,6 @@ namespace Test.FileReadingTests
             }
 
             Assert.AreEqual(1, localGlycans.Count);
-
         }
 
         [Test]
@@ -87,6 +87,40 @@ namespace Test.FileReadingTests
             Assert.AreEqual(1, parsedPsms.Count);
             IEnumerable<string> expectedIons = new string[] { "y3+1", "y4+1", "b4+1", "b5+1", "b6+1", "b8+1" };
             Assert.That(6 == parsedPsms[0].MatchedIons.Select(p => p.Annotation).Intersect(expectedIons).Count());
+        }
+
+        [Test]
+        public static void FailWhenPathIsBadAndContainsNoting()
+        {
+            string psmFile = @"DatabaseTests\bad4.fasta";
+            var lines = File.ReadAllLines(psmFile).Length;
+
+            // Throws the right type of exception
+            Assert.Throws<MzLibException>(() =>
+            {
+                SpectrumMatchTsvReader.ReadPsmTsv(psmFile, out _);
+            });
+
+            // Wrapped up the parsing exception in a MzLibException
+            bool caught = false;
+            List<string> warnings = [];
+            List<PsmFromTsv> parsedPsms = [];
+            try
+            {
+                parsedPsms = SpectrumMatchTsvReader.ReadPsmTsv(psmFile, out warnings);
+            }
+            catch (MzLibException e)
+            {
+                caught = true;
+                Assert.That(parsedPsms.Count == 0);
+                Assert.That(warnings.Count == lines);
+                Assert.That(e is MzLibException);
+                Assert.That(e.InnerException, Is.Not.Null);
+                Assert.That(e.InnerException, Is.TypeOf<MzLibException>());
+                Assert.That(e.InnerException.Message, Does.Contain("type not supported"));
+            }
+
+            Assert.That(caught);
         }
 
         [Test]
