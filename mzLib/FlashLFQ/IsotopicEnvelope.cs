@@ -1,4 +1,8 @@
-﻿namespace FlashLFQ
+﻿using System.Collections.Generic;
+using System.Linq;
+using MassSpectrometry.MzSpectra;
+
+namespace FlashLFQ
 {
     /// <summary>
     /// Contains the summed intensities of all isotope peaks detected in a single MS1 scan for a given species.
@@ -54,6 +58,51 @@
             return otherEnv != null
                 && otherEnv.ChargeState == this.ChargeState
                 && otherEnv.IndexedPeak.Equals(this.IndexedPeak);
+        }
+
+        public override int GetHashCode()
+        {
+            return ChargeState.GetHashCode() + IndexedPeak.GetHashCode();
+        }
+    }
+
+    public class ExtendedIsotopicEnvelope : IsotopicEnvelope
+    {
+        public List<IIndexedMzPeak> IsotopologuePeaks { get; private set; }
+        public ExtendedIsotopicEnvelope(List<IIndexedMzPeak> isotopePeaks, IIndexedMzPeak monoisotopicPeak, int chargeState, double intensity, double pearsonCorrelation) :
+            base(monoisotopicPeak, chargeState, intensity, pearsonCorrelation)
+        {
+            IsotopologuePeaks = isotopePeaks.OrderBy(p => p.Mz).ToList();
+        }
+
+        public HashSet<IIndexedMzPeak> PeakSet
+        {
+            get
+            {
+                _peakSet ??= IsotopologuePeaks.ToHashSet();
+                return _peakSet;
+            }
+        }
+
+        private HashSet<IIndexedMzPeak> _peakSet;
+
+        public double[] MzArray => IsotopologuePeaks.Select(p => p.Mz).ToArray();
+        public double[] IntensityArray => IsotopologuePeaks.Select(p => p.Intensity).ToArray();
+
+        public double CheckSimilarity(ExtendedIsotopicEnvelope other)
+        {
+            double? cosineSimilarity = new SpectralSimilarity(MzArray, IntensityArray, other.MzArray, other.IntensityArray, SpectralSimilarity.SpectrumNormalizationScheme.MostAbundantPeak,
+                toleranceInPpm: 5, allPeaks: true, filterOutBelowThisMz: 100).CosineSimilarity();
+            return cosineSimilarity ?? -1;
+        }
+
+        public override bool Equals(object obj)
+        {
+            var otherEnv = (IsotopicEnvelope)obj;
+
+            return otherEnv != null
+                   && otherEnv.ChargeState == this.ChargeState
+                   && otherEnv.IndexedPeak.Equals(this.IndexedPeak);
         }
 
         public override int GetHashCode()

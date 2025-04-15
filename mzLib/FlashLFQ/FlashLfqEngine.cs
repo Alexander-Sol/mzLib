@@ -1683,7 +1683,7 @@ namespace FlashLFQ
                         }
                     }
 
-                    isotopicEnvelopes.Add(new ExtendedIsotopicEnvelope(zeroShiftPeaks, peak, chargeState, experimentalIsotopeIntensities.Sum(), pearsonCorr));
+                    isotopicEnvelopes.Add(new IsotopicEnvelope(zeroShiftPeaks.MaxBy(p => p.Intensity), chargeState, experimentalIsotopeIntensities.Sum(), pearsonCorr));
                 }
             }
 
