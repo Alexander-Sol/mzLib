@@ -71,6 +71,7 @@ namespace Readers
         [Name("Peak Detection Type")]
         public string PeakDetectionType { get; set; }
 
+        [Optional]
         [Name("MBR Score")]
         [TypeConverter(typeof(DashToNullOrDoubleConverter))]
         public double MBRScore { get; set; }
@@ -90,5 +91,9 @@ namespace Readers
         [Name("Peak Apex Mass Error (ppm)")]
         [TypeConverter(typeof(DashToNullOrDoubleConverter))]
         public double? PeakApexMassError { get; set; }
+
+        [Optional]
+        [Name("Best_Matching_Sequence")]
+        public string BestMatchingSequence { get; set; }
     }
 }

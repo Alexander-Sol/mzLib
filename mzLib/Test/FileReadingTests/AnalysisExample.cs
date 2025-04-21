@@ -12,6 +12,7 @@ using Readers;
 using Stopwatch = System.Diagnostics.Stopwatch;
 using Plotly.NET.CSharp;
 using MathNet.Numerics.Distributions;
+using static Plotly.NET.StyleParam.DrawingStyle;
 
 namespace Test.FileReadingTests
 {
@@ -49,6 +50,33 @@ namespace Test.FileReadingTests
                 .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity of Diagnostic Ions"))
                 .WithSize(Width: 1000, Height: 500)
                 .Show();
+        }
+
+        [Test]
+        public static void AnalyzeFlashData()
+        {
+            string dataPath = @"D:\JurkatTopdown\MM108_DecoyPTMs_MOxVariable\FlashLFQ_Tweaked\QuantifiedPeaks.tsv";
+            var peaks = FileReader.ReadFile<QuantifiedPeakFile>(dataPath);
+            int mixedDecoyRealModPeaks = 0;
+            int successfulDisambiguations = 0;
+            int totalDecoyMods = 0;
+            foreach (var peak in peaks)
+            {
+                if (!peak.FullSequence.Contains(":Decoy")) continue;
+                if (peak.BestMatchingSequence.Contains(":Decoy"))
+                {
+                    totalDecoyMods++;
+                }
+                var x = peak.FullSequence.Split('|');
+                if (x.Length < 2) continue;
+                if(x.Any(s => s.Contains(":Decoy")) && !x.All(s => s.Contains(":Decoy")))
+                {
+                    mixedDecoyRealModPeaks++;
+                    if (!peak.BestMatchingSequence.Contains(":Decoy")) successfulDisambiguations++;
+                }
+            }
+
+            int placeholder = 0;
         }
 
         [Test]
@@ -131,9 +159,9 @@ namespace Test.FileReadingTests
 
             Random randomScaling = new();
 
-            for(int z = 25; z < 36; z++)
+            for(int z = 14; z < 23; z++)
             {
-                int chargeStateScalingFactor = 6 - Math.Abs(z - 30);
+                int chargeStateScalingFactor = 6 - Math.Abs(z - 18);
                 double randomScalingFactor = randomScaling.NextDouble() * 0.2 + 0.9;
 
                 // unmodified
@@ -149,7 +177,7 @@ namespace Test.FileReadingTests
             }
 
             var noiseParams = new LowFrequencyNoiseParameters(peakNumberLimitLow:5999, peakNumberLimitHigh: 6000, 
-                peakLocationLimitLow: 390, peakLocationLimitHigh: 575, peakIntensityLimitHigh: 1500);
+                peakLocationLimitLow: 625, peakLocationLimitHigh: 1000, peakIntensityLimitHigh: 1500);
 
             var lowFreqNoiseSpectrum = SimulatedData.BuildLowFrequencyNoiseSpectrum(noiseParams);
             mzArrayList.Add(lowFreqNoiseSpectrum.XArray);
@@ -161,26 +189,57 @@ namespace Test.FileReadingTests
 
             SimulatedData.AddHighFrequencyNoiseToYArray(displaySpectrum.YArray, new Normal(250, 1500));
 
-            MsDataScan[] scans = new MsDataScan[1];
+            MsDataScan[] scans = new MsDataScan[5];
 
             // add the scan
             scans[0] = new MsDataScan(massSpectrum: displaySpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
                 polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
                 mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
-                isolationMZ: 462, isolationWidth: 4);
+                isolationMZ: 692, isolationWidth: 4);
+
+            scans[1] = new MsDataScan(massSpectrum: displaySpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 729, isolationWidth: 4);
+
+            scans[2] = new MsDataScan(massSpectrum: displaySpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 770, isolationWidth: 4);
+
+            scans[3] = new MsDataScan(massSpectrum: displaySpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 815, isolationWidth: 4);
+
+            scans[4] = new MsDataScan(massSpectrum: displaySpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: displaySpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 866, isolationWidth: 4);
 
             var myMsDataFile = new FakeMsDataFile(scans);
-            MsDataScan scan = myMsDataFile.GetAllScansList()[0];
+            //MsDataScan scan = myMsDataFile.GetAllScansList()[0];
 
             DeconvolutionParameters deconParams = new ClassicDeconvolutionParameters(1, 60, 4, 3);
 
-            var precursors = scan.GetIsolatedMassesAndCharges(scan.MassSpectrum, deconParams).ToList();
+            var precursors = new List<IsotopicEnvelope>();
+            foreach(var scan in myMsDataFile.GetAllScansList())
+            {
+                precursors.AddRange(scan.GetIsolatedMassesAndCharges(scan.MassSpectrum, deconParams));
+            }
 
-            var deconvolutedMonoisotopicMasses = precursors.Select(p => p.MonoisotopicMass).OrderBy(d => d).ToList();
+            var deconvolutedMonoisotopicMasses = precursors.Select(p => p.MonoisotopicMass).OrderBy(d => d).Distinct().ToList();
             var actualMonoisotopicMasses = chemicalFormulas.Select(cf => cf.MonoisotopicMass).OrderBy(d => d).ToList();
 
             Console.WriteLine("Ground truth monoisotopic masses:\n" + String.Join("\n", actualMonoisotopicMasses));
             Console.WriteLine("Deconvoluted monoisotopic masses:\n" + String.Join("\n", deconvolutedMonoisotopicMasses));
+
+            using(var sw = new StreamWriter(@"C:\Users\Alex\Documents\TopDownVision\ActualVsDecon.tsv"))
+            {
+                sw.Write("Actual\t");
+                sw.WriteLine(string.Join('\t', actualMonoisotopicMasses));
+                sw.WriteLine(string.Join('\t', deconvolutedMonoisotopicMasses.OrderBy(m => m).ToList()));
+            }
 
             PlotSpectrum(displaySpectrum.XArray, displaySpectrum.YArray);
         }
