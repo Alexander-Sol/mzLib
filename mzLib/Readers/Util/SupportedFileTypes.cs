@@ -12,6 +12,8 @@ namespace Readers
         ThermoRaw,
         MzML,
         Mgf,
+        Ms1Align,
+        Ms2Align,
         psmtsv,
         osmtsv,
         ToppicPrsm,
@@ -54,6 +56,8 @@ namespace Readers
                 SupportedFileType.Mgf => ".mgf",
                 SupportedFileType.BrukerD => ".d",
                 SupportedFileType.BrukerTimsTof => ".d",
+                SupportedFileType.Ms1Align => "_ms1.msalign",
+                SupportedFileType.Ms2Align => "_ms2.msalign",
                 SupportedFileType.psmtsv => ".psmtsv",
                 SupportedFileType.osmtsv => ".osmtsv",
                 SupportedFileType.ToppicPrsm => "_prsm.tsv",
@@ -156,6 +160,13 @@ namespace Readers
                         return SupportedFileType.CruxResult;
                     throw new MzLibException("Txt file type not supported");
 
+                case ".msalign":
+                    if (filePath.EndsWith(SupportedFileType.Ms1Align.GetFileExtension(), StringComparison.InvariantCultureIgnoreCase))
+                        return SupportedFileType.Ms1Align;
+                    if (filePath.EndsWith(SupportedFileType.Ms2Align.GetFileExtension(), StringComparison.InvariantCultureIgnoreCase))
+                        return SupportedFileType.Ms2Align;
+                    throw new MzLibException("MsAlign file type not supported, must end with _msX.msalign where X is 1 or 2");
+
                 default:
                     throw new MzLibException("File type not supported");
             }
@@ -197,6 +208,8 @@ namespace Readers
                 SupportedFileType.Mgf => typeof(MsDataFileToResultFileAdapter),
                 SupportedFileType.BrukerD => typeof(MsDataFileToResultFileAdapter),
                 SupportedFileType.BrukerTimsTof => typeof(MsDataFileToResultFileAdapter),
+                SupportedFileType.Ms1Align => typeof(MsDataFileToResultFileAdapter),
+                SupportedFileType.Ms2Align => typeof(MsDataFileToResultFileAdapter),
                 SupportedFileType.Proforma => typeof(ProformaFile),
                 _ => throw new MzLibException("File type not supported")
             };
