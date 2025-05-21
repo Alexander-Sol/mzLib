@@ -125,6 +125,38 @@ namespace Test.FileReadingTests
 
         }
 
+        [Test]
+        public static void ProFormaReader()
+        {
+            string prosightPath = @"C:\Users\Alex\Downloads\Jurkat_ProsightPdChimeras_Rep2_15_10ppm_PSMs_ProformaFile.tsv";
+            string mmPath = @"C:\Users\Alex\Downloads\Jurkat_MetaMorpheus_Rep2_WithLibrary_NewPEP_NoNorm_PSMs_ProformaFile.tsv";
+            string mspftPath = @"C:\Users\Alex\Downloads\Jurkat_MsPathFinderTWithMods_15Rep2_Final_PSMs_ProformaFile.tsv";
+
+            var prosightFile = new ProformaFile(prosightPath)
+                .Where(id => id.FileName == "2_05" && id.ScanNumber > 2100 && id.ScanNumber < 2420)
+                .DistinctBy(id => id.FullSequence)
+                .ToList();
+
+            var mmFile = new ProformaFile(mmPath)
+                .Where(id => id.FileName == "2_05" && id.ScanNumber > 2100 && id.ScanNumber < 2420)
+                .DistinctBy(id => id.FullSequence)
+                .ToList();
+
+            //var mspftFile = new ProformaFile(mspftPath)
+            //    .Where(id => id.FileName == "2_05" && id.ScanNumber > 2100 && id.ScanNumber < 2420)
+            //    .DistinctBy(id => id.FullSequence)
+            //    .ToList();
+
+            var normal = new Normal(2264, 65);
+
+
+
+
+            /// Histone target scan = 2264 +- 120
+
+            int x = 0;
+        }   
+
 
         [Test]
         public static void GetCombinedIsoEnv()

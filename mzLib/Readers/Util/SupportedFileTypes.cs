@@ -28,7 +28,8 @@ namespace Readers
         CruxResult,
         ExperimentAnnotation,
         BrukerD,
-        BrukerTimsTof
+        BrukerTimsTof,
+        Proforma
     }
 
     public static class SupportedFileTypeExtensions
@@ -68,6 +69,7 @@ namespace Readers
                 SupportedFileType.MsPathFinderTAllResults => "_IcTDA.tsv",
                 SupportedFileType.CruxResult => ".txt",
                 SupportedFileType.ExperimentAnnotation => "experiment_annotation.tsv",
+                SupportedFileType.Proforma => "ProformaFile.tsv",
                 _ => throw new MzLibException("File type not supported")
             };
         }
@@ -135,10 +137,12 @@ namespace Readers
                         return SupportedFileType.MsPathFinderTAllResults;
                     if(filePath.EndsWith(SupportedFileType.ExperimentAnnotation.GetFileExtension(), StringComparison.InvariantCultureIgnoreCase))
                         return SupportedFileType.ExperimentAnnotation;
+                    if(filePath.EndsWith(SupportedFileType.Proforma.GetFileExtension(), StringComparison.InvariantCulture))
+                        return SupportedFileType.Proforma;
 
-                    // these tsv cases are just .tsv and need an extra step to determine the type
-                    // currently need to distinguish between FlashDeconvTsv and MsFraggerPsm
-                    using var sw = new StreamReader(filePath);
+                        // these tsv cases are just .tsv and need an extra step to determine the type
+                        // currently need to distinguish between FlashDeconvTsv and MsFraggerPsm
+                        using var sw = new StreamReader(filePath);
                     var firstLine = sw.ReadLine() ?? "";
                     if (firstLine == "") throw new MzLibException("Tsv file is empty");
 
@@ -193,6 +197,7 @@ namespace Readers
                 SupportedFileType.Mgf => typeof(MsDataFileToResultFileAdapter),
                 SupportedFileType.BrukerD => typeof(MsDataFileToResultFileAdapter),
                 SupportedFileType.BrukerTimsTof => typeof(MsDataFileToResultFileAdapter),
+                SupportedFileType.Proforma => typeof(ProformaFile),
                 _ => throw new MzLibException("File type not supported")
             };
         }
