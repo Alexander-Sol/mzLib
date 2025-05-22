@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using MassSpectrometry;
 using MassSpectrometry.MzSpectra;
 
 namespace FlashLFQ
@@ -12,10 +13,10 @@ namespace FlashLFQ
         /// <summary>
         /// The most abundant isotopic peak used for peak finding.
         /// </summary>
-        public readonly IIndexedMzPeak IndexedPeak;
+        public readonly IIndexedPeak IndexedPeak;
         public readonly int ChargeState;
 
-        public IsotopicEnvelope(IIndexedMzPeak monoisotopicPeak, int chargeState, double intensity, double pearsonCorrelation)
+        public IsotopicEnvelope(IIndexedPeak monoisotopicPeak, int chargeState, double intensity, double pearsonCorrelation)
         {
             IndexedPeak = monoisotopicPeak;
             ChargeState = chargeState;
@@ -68,14 +69,14 @@ namespace FlashLFQ
 
     public class ExtendedIsotopicEnvelope : IsotopicEnvelope
     {
-        public List<IIndexedMzPeak> IsotopologuePeaks { get; private set; }
-        public ExtendedIsotopicEnvelope(List<IIndexedMzPeak> isotopePeaks, IIndexedMzPeak monoisotopicPeak, int chargeState, double intensity, double pearsonCorrelation) :
+        public List<IIndexedPeak> IsotopologuePeaks { get; private set; }
+        public ExtendedIsotopicEnvelope(List<IIndexedPeak> isotopePeaks, IIndexedPeak monoisotopicPeak, int chargeState, double intensity, double pearsonCorrelation) :
             base(monoisotopicPeak, chargeState, intensity, pearsonCorrelation)
         {
-            IsotopologuePeaks = isotopePeaks.OrderBy(p => p.Mz).ToList();
+            IsotopologuePeaks = isotopePeaks.OrderBy(p => p.M).ToList();
         }
 
-        public HashSet<IIndexedMzPeak> PeakSet
+        public HashSet<IIndexedPeak> PeakSet
         {
             get
             {
@@ -84,9 +85,9 @@ namespace FlashLFQ
             }
         }
 
-        private HashSet<IIndexedMzPeak> _peakSet;
+        private HashSet<IIndexedPeak> _peakSet;
 
-        public double[] MzArray => IsotopologuePeaks.Select(p => p.Mz).ToArray();
+        public double[] MzArray => IsotopologuePeaks.Select(p => p.M).ToArray();
         public double[] IntensityArray => IsotopologuePeaks.Select(p => p.Intensity).ToArray();
 
         public double CheckSimilarity(ExtendedIsotopicEnvelope other)

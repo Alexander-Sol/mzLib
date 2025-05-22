@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU Lesser General Public
 // License along with Chemistry Library. If not, see <http://www.gnu.org/licenses/>.
 
+using Easy.Common.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -55,6 +56,8 @@ namespace Chemistry
             masses = new double[count];
             intensities = new double[count];
         }
+
+        public double MostAbundantMass => masses[intensities.IndexOf(Intensities.Max())];
 
         // Clone() produces shallow copies, but because double is a primitive type, this is acceptable
         public double[] Masses => (double[]) masses.Clone();

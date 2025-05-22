@@ -1,18 +1,24 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using Chemistry;
+﻿using Chemistry;
 using MassSpectrometry;
+using MathNet.Numerics.Distributions;
 using MzIdentML;
 using MzLibUtil;
 using NUnit.Framework;
-using Proteomics.AminoAcidPolymer;
-using Readers;
-using Stopwatch = System.Diagnostics.Stopwatch;
+using Plotly.NET;
 using Plotly.NET.CSharp;
-using MathNet.Numerics.Distributions;
+using Proteomics.AminoAcidPolymer;
+using Proteomics.ProteolyticDigestion;
+using Readers;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Windows.Documents;
 using static Plotly.NET.StyleParam.DrawingStyle;
+using Chart = Plotly.NET.CSharp.Chart;
+using GenericChartExtensions = Plotly.NET.CSharp.GenericChartExtensions;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace Test.FileReadingTests
 {
@@ -44,12 +50,13 @@ namespace Test.FileReadingTests
                 intensityArray[i] = ms2Scans[i].MassSpectrum.YArray[idx240] + ms2Scans[i].MassSpectrum.YArray[idx509];
             }
 
-            Chart.Line<double, double, string>(rtArray, intensityArray)
-                .WithTraceInfo("Diagnostic Ions")
+            var x = Chart.Line<double, double, string>(rtArray, intensityArray)
+                .WithTitle("Diagnostic Ions")
                 .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Retention Time (min)"))
                 .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity of Diagnostic Ions"))
-                .WithSize(Width: 1000, Height: 500)
-                .Show();
+                .WithSize(Width: 1000, Height: 500);
+
+            GenericChartExtensions.Show(x);
         }
 
         [Test]
@@ -116,12 +123,12 @@ namespace Test.FileReadingTests
                 polarity: Polarity.Positive, retentionTime: rt, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
                 mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: intensities.Sum(), injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1));
 
-            Chart.Line<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
-                .WithTraceInfo("Theoretical Envelope")
-                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
-                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
-                .WithSize(Width: 1000, Height: 500)
-                .Show();
+            //Chart.Line<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
+            //    .WithTitle("Theoretical Envelope")
+            //    .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+            //    .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+            //    .WithSize(Width: 1000, Height: 500)
+            //    .Show();
 
         }
 
@@ -133,12 +140,12 @@ namespace Test.FileReadingTests
             string mspftPath = @"C:\Users\Alex\Downloads\Jurkat_MsPathFinderTWithMods_15Rep2_Final_PSMs_ProformaFile.tsv";
 
             var prosightFile = new ProformaFile(prosightPath)
-                .Where(id => id.FileName == "2_05" && id.ScanNumber > 2100 && id.ScanNumber < 2420)
+                .Where(id => id.FileName == "2_05" && id.ScanNumber > 2200 && id.ScanNumber < 2320)
                 .DistinctBy(id => id.FullSequence)
                 .ToList();
 
             var mmFile = new ProformaFile(mmPath)
-                .Where(id => id.FileName == "2_05" && id.ScanNumber > 2100 && id.ScanNumber < 2420)
+                .Where(id => id.FileName == "2_05" && id.ScanNumber > 2200 && id.ScanNumber < 2320)
                 .DistinctBy(id => id.FullSequence)
                 .ToList();
 
@@ -147,15 +154,186 @@ namespace Test.FileReadingTests
             //    .DistinctBy(id => id.FullSequence)
             //    .ToList();
 
-            var normal = new Normal(2264, 65);
+            var sequenceIntersect = prosightFile.Select(p => p.FullSequence).Intersect(mmFile.Select(m => m.FullSequence)).ToHashSet();
 
 
+            var normal = new Normal(2264, 40);
 
+            List<PeptideWithSetModifications> sharedForms = new();
+            List<double> intensities = new();
+            List<double> manualScaling = new();
+            foreach(var record in prosightFile)
+            {
+                if (!sequenceIntersect.Contains(record.FullSequence)) continue;
+                sharedForms.Add(new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary));
+                intensities.Add(normal.Density(record.ScanNumber) * 100);
+            }
+
+            double baseScalingFactor = 75000;
+
+            HashSet<int> alreadyObservedMasses = new();
+
+            List<double[]> mzArrayList = new();
+            List<int[]> intensityArrayList = new();
+            PopulateArrayLists(mzArrayList, intensityArrayList, sharedForms, intensities, alreadyObservedMasses, baseScalingFactor);
+            for (int i = 0; i < sharedForms.Count; i++)
+            {
+                for (int z = 14; z < 23; z++)
+                {
+                    int chargeStateScalingFactor = 6 - Math.Abs(z - 18);
+                    double randomScalingFactor = intensities[i];
+
+                    var dist = IsotopicDistribution.GetDistribution(sharedForms[i].FullChemicalFormula, 0.125, 1e-8);
+                    if (z == 14)
+                    {
+                        if (alreadyObservedMasses.Contains((int)(dist.MostAbundantMass * 1000)))
+                        {
+                            break;
+                        }
+                        else alreadyObservedMasses.Add((int)(dist.MostAbundantMass * 1000));
+                    }
+
+                    if (z == 18)
+                    {
+                        double mostAbundant = dist.MostAbundantMass.ToMz(18);
+                        if (Math.Abs(mostAbundant - 766.2) < 0.1)
+                        {
+                            randomScalingFactor *= 2;
+
+                        }
+                        else if (Math.Abs(mostAbundant - 765.43) < 0.1)
+                        {
+                            randomScalingFactor *= 0.6;
+                        }
+                        else if (Math.Abs(mostAbundant - 766.31) < 0.1)
+                        {
+                            randomScalingFactor *= 1;
+                        }
+                        else if (Math.Abs(mostAbundant - 767.04) < 0.1)
+                        {
+                            randomScalingFactor *= 1;
+                        }
+                        else if (Math.Abs(mostAbundant - 767.87) < 0.1)
+                        {
+                            randomScalingFactor *= 0.5;
+                        }
+                        else if (Math.Abs(mostAbundant - 767.59) < 0.1)
+                        {
+                            randomScalingFactor *= 0.2;
+                        }
+                        else
+                        {
+                            randomScalingFactor *= 0.05;
+                        }
+                    }
+
+                        // unmodified
+                        mzArrayList.Add(dist.Masses.Select(v => v.ToMz(z)).ToArray());
+                    intensityArrayList.Add(dist.Intensities.Select(v => (int)(v * baseScalingFactor * chargeStateScalingFactor * randomScalingFactor)).ToArray());
+                }
+            }
+          
+
+            //var noiseParams = new LowFrequencyNoiseParameters(peakNumberLimitLow: 5999, peakNumberLimitHigh: 6000,
+            //    peakLocationLimitLow: 625, peakLocationLimitHigh: 1000, peakIntensityLimitHigh: 1500);
+
+            //var lowFreqNoiseSpectrum = SimulatedData.BuildLowFrequencyNoiseSpectrum(noiseParams);
+            //mzArrayList.Add(lowFreqNoiseSpectrum.XArray);
+            //intensityArrayList.Add(lowFreqNoiseSpectrum.YArray.Select(d => (int)d).ToArray());
+
+            var displaySpectrum = TofSpectraMerger.MergeArraysToMs2Spectrum(mzArrayList, intensityArrayList, ppmTolerance: 5);
+
+           
+
+            SimulatedData.AddHighFrequencyNoiseToYArray(displaySpectrum.YArray, new Normal(250, 2590));
+
+            //PlotSpectrum(displaySpectrum.XArray, displaySpectrum.YArray);
+            Plotly.NET.GenericChart plot = GetSpectrumPlot(displaySpectrum.XArray, displaySpectrum.YArray, "green");
+
+            var metaSequences = mmFile.Select(m => m.FullSequence).Where(s => !sequenceIntersect.Contains(s)).ToHashSet();
+            var prosightSequences = prosightFile.Select(p => p.FullSequence).Where(s => !sequenceIntersect.Contains(s)).ToHashSet();
+
+            sharedForms.Clear();
+            foreach (var record in mmFile)
+            {
+                if (!metaSequences.Contains(record.FullSequence)) continue;
+                sharedForms.Add(new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary));
+                intensities.Add(normal.Density(record.ScanNumber) * 100);
+            }
+
+
+            GenericChartExtensions.Show(plot);
+
+            var testPep = new PeptideWithSetModifications(prosightFile.First().FullSequence, ModificationConverter.AllKnownModsDictionary);
+            var mass = testPep.FullChemicalFormula.MonoisotopicMass;
 
             /// Histone target scan = 2264 +- 120
 
             int x = 0;
         }   
+
+
+        public static void PopulateArrayLists(List<double[]> mzArrayList, List<int[]> intensityArrayList, List<PeptideWithSetModifications> forms, List<double> intensities, 
+            HashSet<int> alreadyObservedMasses, double baseScalingFactor = 75000)
+        {
+            for (int i = 0; i < forms.Count; i++)
+            {
+                for (int z = 14; z < 23; z++)
+                {
+                    int chargeStateScalingFactor = 6 - Math.Abs(z - 18);
+                    double randomScalingFactor = intensities[i];
+
+                    var dist = IsotopicDistribution.GetDistribution(forms[i].FullChemicalFormula, 0.125, 1e-8);
+                    if (z == 14)
+                    {
+                        if (alreadyObservedMasses.Contains((int)(dist.MostAbundantMass * 1000)))
+                        {
+                            break;
+                        }
+                        else alreadyObservedMasses.Add((int)(dist.MostAbundantMass * 1000));
+                    }
+
+                    if (z == 18)
+                    {
+                        double mostAbundant = dist.MostAbundantMass.ToMz(18);
+                        if (Math.Abs(mostAbundant - 766.2) < 0.1)
+                        {
+                            randomScalingFactor *= 2;
+
+                        }
+                        else if (Math.Abs(mostAbundant - 765.43) < 0.1)
+                        {
+                            randomScalingFactor *= 0.6;
+                        }
+                        else if (Math.Abs(mostAbundant - 766.31) < 0.1)
+                        {
+                            randomScalingFactor *= 1;
+                        }
+                        else if (Math.Abs(mostAbundant - 767.04) < 0.1)
+                        {
+                            randomScalingFactor *= 1;
+                        }
+                        else if (Math.Abs(mostAbundant - 767.87) < 0.1)
+                        {
+                            randomScalingFactor *= 0.5;
+                        }
+                        else if (Math.Abs(mostAbundant - 767.59) < 0.1)
+                        {
+                            randomScalingFactor *= 0.2;
+                        }
+                        else
+                        {
+                            randomScalingFactor *= 0.05;
+                        }
+                    }
+
+                    // unmodified
+                    mzArrayList.Add(dist.Masses.Select(v => v.ToMz(z)).ToArray());
+                    intensityArrayList.Add(dist.Intensities.Select(v => (int)(v * baseScalingFactor * chargeStateScalingFactor * randomScalingFactor)).ToArray());
+                }
+            }
+        }
+
 
 
         [Test]
@@ -276,7 +454,6 @@ namespace Test.FileReadingTests
             PlotSpectrum(displaySpectrum.XArray, displaySpectrum.YArray);
         }
 
-
         public static void PlotSpectrum(double[] xArray, double[] yArray)
         {
             double[] plotMz = new double[xArray.Length * 3];
@@ -298,12 +475,40 @@ namespace Test.FileReadingTests
                 plotIntensity[third] = 0;
             }
 
-            Chart.Line<double, double, string>(plotMz, plotIntensity)
-                .WithTraceInfo("Theoretical Envelope")
+            //Chart.Line<double, double, string>(plotMz, plotIntensity)
+            //    .WithTitle("Theoretical Envelope")
+            //    .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+            //    .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+            //    .WithSize(Width: 1000, Height: 500)
+            //    .Show();
+        }
+
+        public static GenericChart GetSpectrumPlot(double[] xArray, double[] yArray, string color = "red")
+        {
+            double[] plotMz = new double[xArray.Length * 3];
+            double[] plotIntensity = new double[yArray.Length * 3];
+
+            for (int i = 0; i < xArray.Length; i++)
+            {
+                int first = (3 * i);
+                int second = (3 * i + 1);
+                int third = (3 * i + 2);
+
+                plotMz[first] = xArray[i] - 0.00001;
+                plotIntensity[first] = 0;
+
+                plotMz[second] = xArray[i];
+                plotIntensity[second] = Math.Max(0, yArray[i]);
+
+                plotMz[third] = xArray[i] + 0.00001;
+                plotIntensity[third] = 0;
+            }
+
+            return Chart.Line<double, double, string>(plotMz, plotIntensity, LineColor: Plotly.NET.Color.fromString(color))
+                .WithTitle("Theoretical Envelope")
                 .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
                 .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
-                .WithSize(Width: 1000, Height: 500)
-                .Show();
+                .WithSize(Width: 1000, Height: 500);
         }
 
         [Test]
@@ -333,12 +538,12 @@ namespace Test.FileReadingTests
             //    intensityArray[i] = ms2Scans[i].MassSpectrum.YArray[idx240] + ms2Scans[i].MassSpectrum.YArray[idx509];
             //}
 
-            Chart.Point<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
-                .WithTraceInfo("Diagnostic Ions")
-                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
-                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
-                .WithSize(Width: 1000, Height: 500)
-                .Show();
+            //Chart.Point<double, double, string>(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray)
+            //    .WithTitle("Diagnostic Ions")
+            //    .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+            //    .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+            //    .WithSize(Width: 1000, Height: 500)
+            //    .Show();
         }
 
         [Test]
@@ -368,12 +573,12 @@ namespace Test.FileReadingTests
             //    intensityArray[i] = ms2Scans[i].MassSpectrum.YArray[idx240] + ms2Scans[i].MassSpectrum.YArray[idx509];
             //}
 
-            Chart.Bar<double, double, string>(scan.MassSpectrum.XArray.Select(x => Math.Log(x)), scan.MassSpectrum.YArray)
-                .WithTraceInfo("Diagnostic Ions")
-                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
-                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
-                .WithSize(Width: 1000, Height: 500)
-                .Show();
+            //Chart.Bar<double, double, string>(scan.MassSpectrum.XArray.Select(x => Math.Log(x)), scan.MassSpectrum.YArray)
+            //    .WithTitle("Diagnostic Ions")
+            //    .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+            //    .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
+            //    .WithSize(Width: 1000, Height: 500)
+            //    .Show();
         }
     }
 }

@@ -14,6 +14,8 @@ public static class ModificationConverter
 
     internal static List<Modification> AllKnownMods;
 
+    public static Dictionary<string, Modification> AllKnownModsDictionary => AllKnownMods.DistinctBy(m => m.IdWithMotif).ToDictionary(p => p.IdWithMotif, p => p);
+
     static ModificationConverter()
     {
         _modificationCache = new ConcurrentDictionary<(string, char), Modification>();
