@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Printing;
 using System.Windows.Documents;
 using static Plotly.NET.StyleParam.DrawingStyle;
 using Chart = Plotly.NET.CSharp.Chart;
@@ -162,12 +163,28 @@ namespace Test.FileReadingTests
             List<PeptideWithSetModifications> sharedForms = new();
             List<double> intensities = new();
             List<double> manualScaling = new();
-            foreach(var record in prosightFile)
+
+            using(StreamWriter sw = new StreamWriter(@"C:\Users\Alex\Documents\TopDownVision\ConsensusSimulatedProteoforms.tsv"))
             {
-                if (!sequenceIntersect.Contains(record.FullSequence)) continue;
-                sharedForms.Add(new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary));
-                intensities.Add(normal.Density(record.ScanNumber) * 100);
+                sw.WriteLine("ScanNumber\tAccession\tMost Abundant Mass\tMonoisotopic Mass\tModLocations\tFullSequence\tElutionIntensity");
+                foreach (var record in prosightFile)
+                {
+                    if (!sequenceIntersect.Contains(record.FullSequence)) continue;
+                    var pep = new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary);
+                    sharedForms.Add(pep);
+                    var dist = IsotopicDistribution.GetDistribution(sharedForms.Last().FullChemicalFormula);
+                    double mostAbundant = dist.MostAbundantMass.ToMz(18);
+                    intensities.Add(normal.Density(record.ScanNumber) * 100);
+                    sw.WriteLine(record.ScanNumber + "\t" +
+                                 record.ProteinAccession + "\t" +
+                                mostAbundant + "\t" + 
+                                pep.MonoisotopicMass.ToMz(18) + "\t" +
+                                string.Join(";", pep.AllModsOneIsNterminus.Select(kvp => kvp.Key + "-" + kvp.Value.IdWithMotif)) + "\t" + 
+                                record.FullSequence + "\t" + 
+                                normal.Density(record.ScanNumber) * 100);
+                }
             }
+            
 
             double baseScalingFactor = 75000;
 
@@ -175,94 +192,86 @@ namespace Test.FileReadingTests
 
             List<double[]> mzArrayList = new();
             List<int[]> intensityArrayList = new();
-            PopulateArrayLists(mzArrayList, intensityArrayList, sharedForms, intensities, alreadyObservedMasses, baseScalingFactor);
-            for (int i = 0; i < sharedForms.Count; i++)
-            {
-                for (int z = 14; z < 23; z++)
-                {
-                    int chargeStateScalingFactor = 6 - Math.Abs(z - 18);
-                    double randomScalingFactor = intensities[i];
-
-                    var dist = IsotopicDistribution.GetDistribution(sharedForms[i].FullChemicalFormula, 0.125, 1e-8);
-                    if (z == 14)
-                    {
-                        if (alreadyObservedMasses.Contains((int)(dist.MostAbundantMass * 1000)))
-                        {
-                            break;
-                        }
-                        else alreadyObservedMasses.Add((int)(dist.MostAbundantMass * 1000));
-                    }
-
-                    if (z == 18)
-                    {
-                        double mostAbundant = dist.MostAbundantMass.ToMz(18);
-                        if (Math.Abs(mostAbundant - 766.2) < 0.1)
-                        {
-                            randomScalingFactor *= 2;
-
-                        }
-                        else if (Math.Abs(mostAbundant - 765.43) < 0.1)
-                        {
-                            randomScalingFactor *= 0.6;
-                        }
-                        else if (Math.Abs(mostAbundant - 766.31) < 0.1)
-                        {
-                            randomScalingFactor *= 1;
-                        }
-                        else if (Math.Abs(mostAbundant - 767.04) < 0.1)
-                        {
-                            randomScalingFactor *= 1;
-                        }
-                        else if (Math.Abs(mostAbundant - 767.87) < 0.1)
-                        {
-                            randomScalingFactor *= 0.5;
-                        }
-                        else if (Math.Abs(mostAbundant - 767.59) < 0.1)
-                        {
-                            randomScalingFactor *= 0.2;
-                        }
-                        else
-                        {
-                            randomScalingFactor *= 0.05;
-                        }
-                    }
-
-                        // unmodified
-                        mzArrayList.Add(dist.Masses.Select(v => v.ToMz(z)).ToArray());
-                    intensityArrayList.Add(dist.Intensities.Select(v => (int)(v * baseScalingFactor * chargeStateScalingFactor * randomScalingFactor)).ToArray());
-                }
-            }
-          
-
-            //var noiseParams = new LowFrequencyNoiseParameters(peakNumberLimitLow: 5999, peakNumberLimitHigh: 6000,
-            //    peakLocationLimitLow: 625, peakLocationLimitHigh: 1000, peakIntensityLimitHigh: 1500);
-
-            //var lowFreqNoiseSpectrum = SimulatedData.BuildLowFrequencyNoiseSpectrum(noiseParams);
-            //mzArrayList.Add(lowFreqNoiseSpectrum.XArray);
-            //intensityArrayList.Add(lowFreqNoiseSpectrum.YArray.Select(d => (int)d).ToArray());
-
+            PopulateArrayLists(mzArrayList, intensityArrayList, sharedForms, intensities, alreadyObservedMasses, baseScalingFactor, customScalingFactor: 0.1);
             var displaySpectrum = TofSpectraMerger.MergeArraysToMs2Spectrum(mzArrayList, intensityArrayList, ppmTolerance: 5);
+            SimulatedData.AddHighFrequencyNoiseToYArray(displaySpectrum.YArray, new Normal(250, 250));
+            Plotly.NET.GenericChart sharedPlot = GetSpectrumPlot(displaySpectrum.XArray, displaySpectrum.YArray, "green", opacity: 0.95);
 
-           
-
-            SimulatedData.AddHighFrequencyNoiseToYArray(displaySpectrum.YArray, new Normal(250, 2590));
-
-            //PlotSpectrum(displaySpectrum.XArray, displaySpectrum.YArray);
-            Plotly.NET.GenericChart plot = GetSpectrumPlot(displaySpectrum.XArray, displaySpectrum.YArray, "green");
 
             var metaSequences = mmFile.Select(m => m.FullSequence).Where(s => !sequenceIntersect.Contains(s)).ToHashSet();
-            var prosightSequences = prosightFile.Select(p => p.FullSequence).Where(s => !sequenceIntersect.Contains(s)).ToHashSet();
-
             sharedForms.Clear();
-            foreach (var record in mmFile)
+            intensities.Clear();
+            using (StreamWriter sw = new StreamWriter(@"C:\Users\Alex\Documents\TopDownVision\MetaMorpheusSimulatedProteoforms2.tsv"))
             {
-                if (!metaSequences.Contains(record.FullSequence)) continue;
-                sharedForms.Add(new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary));
-                intensities.Add(normal.Density(record.ScanNumber) * 100);
+                sw.WriteLine("ScanNumber\tAccession\tMost Abundant Mass z=18\tMost Abundant Mass z = 14\tModLocations\tFullSequence\tElutionIntensity");
+                foreach (var record in mmFile)
+                {
+                    if (!metaSequences.Contains(record.FullSequence)) continue;
+                    var pep = new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary);
+                    sharedForms.Add(pep);
+                    var dist = IsotopicDistribution.GetDistribution(sharedForms.Last().FullChemicalFormula);
+                    double mostAbundant = dist.MostAbundantMass.ToMz(18);
+                    intensities.Add(normal.Density(record.ScanNumber) * 100);
+                    sw.WriteLine(record.ScanNumber + "\t" +
+                                 record.ProteinAccession + "\t" +
+                                 mostAbundant + "\t" +
+                                 dist.MostAbundantMass.ToMz(14) + "\t" +
+                                 string.Join(";", pep.AllModsOneIsNterminus.Select(kvp => kvp.Key + "-" + kvp.Value.IdWithMotif)) + "\t" +
+                                 record.FullSequence + "\t" +
+                                 normal.Density(record.ScanNumber) * 100);
+                }
             }
 
+            mzArrayList.Clear();
+            intensityArrayList.Clear();
+            PopulateArrayLists(mzArrayList, intensityArrayList, sharedForms, intensities, alreadyObservedMasses, baseScalingFactor: 25000, meta: true);
+            displaySpectrum = TofSpectraMerger.MergeArraysToMs2Spectrum(mzArrayList, intensityArrayList, ppmTolerance: 5);  
+            SimulatedData.AddHighFrequencyNoiseToYArray(displaySpectrum.YArray, new Normal(250, 250));
+            Plotly.NET.GenericChart mmPlot = GetSpectrumPlot(displaySpectrum.XArray, displaySpectrum.YArray, "blue", scalingFactor: 0.4);
 
-            GenericChartExtensions.Show(plot);
+
+            var prosightSequences = prosightFile.Select(p => p.FullSequence).Where(s => !sequenceIntersect.Contains(s)).ToHashSet();
+            sharedForms.Clear();
+            intensities.Clear();
+
+            using (StreamWriter sw = new StreamWriter(@"C:\Users\Alex\Documents\TopDownVision\ProSightSimulatedProteoforms.tsv"))
+            {
+                sw.WriteLine("ScanNumber\tAccession\tMost Abundant Mass z=18\tMost Abundant Mass z = 15\tModLocations\tFullSequence\tElutionIntensity");
+                foreach (var record in prosightFile)
+                {
+                    if (!prosightSequences.Contains(record.FullSequence)) continue;
+                    var pep = new PeptideWithSetModifications(record.FullSequence, ModificationConverter.AllKnownModsDictionary);
+                    sharedForms.Add(pep);
+                    var dist = IsotopicDistribution.GetDistribution(sharedForms.Last().FullChemicalFormula);
+                    double mostAbundant = dist.MostAbundantMass.ToMz(18);
+                    intensities.Add(normal.Density(record.ScanNumber) * 100);
+                    sw.WriteLine(record.ScanNumber + "\t" +
+                                 record.ProteinAccession + "\t" +
+                                 mostAbundant + "\t" +
+                                 dist.MostAbundantMass.ToMz(15) + "\t" +
+                    string.Join(";", pep.AllModsOneIsNterminus.Select(kvp => kvp.Key + "-" + kvp.Value.IdWithMotif)) + "\t" +
+                                 record.FullSequence + "\t" +
+                                 normal.Density(record.ScanNumber) * 100);
+                }
+            }
+
+            mzArrayList.Clear();
+            intensityArrayList.Clear();
+            PopulateArrayLists(mzArrayList, intensityArrayList, sharedForms, intensities, alreadyObservedMasses, baseScalingFactor, prosight: true);
+            displaySpectrum = TofSpectraMerger.MergeArraysToMs2Spectrum(mzArrayList, intensityArrayList, ppmTolerance: 5);
+            SimulatedData.AddHighFrequencyNoiseToYArray(displaySpectrum.YArray, new Normal(250, 250));
+            Plotly.NET.GenericChart prosightPlot = GetSpectrumPlot(displaySpectrum.XArray, displaySpectrum.YArray, "yellow", scalingFactor: 0.13);
+
+            var experimentalSpectraFile = MsDataFileReader.GetDataFile(@"C:\Users\Alex\Documents\TopDownVision\02-18-20_jurkat_td_rep2_fract5-AveragedHistone.raw");
+            experimentalSpectraFile.LoadAllStaticData();
+            var expSpectrum = experimentalSpectraFile.Scans.First().MassSpectrum;
+            var expPlot = GetSpectrumPlot(expSpectrum.XArray, expSpectrum.YArray, color: "black", opacity: 0.8, mirror: true);
+
+            var envelopePlots = GetEnvelopePlots();
+            
+            var combinedChart = Chart.Combine(new[] {   prosightPlot, mmPlot, sharedPlot, expPlot, envelopePlots[0], envelopePlots[1], envelopePlots[2] });
+
+            GenericChartExtensions.Show(combinedChart);
 
             var testPep = new PeptideWithSetModifications(prosightFile.First().FullSequence, ModificationConverter.AllKnownModsDictionary);
             var mass = testPep.FullChemicalFormula.MonoisotopicMass;
@@ -270,11 +279,167 @@ namespace Test.FileReadingTests
             /// Histone target scan = 2264 +- 120
 
             int x = 0;
-        }   
+            //var noiseParams = new LowFrequencyNoiseParameters(peakNumberLimitLow: 5999, peakNumberLimitHigh: 6000,
+            //    peakLocationLimitLow: 625, peakLocationLimitHigh: 1000, peakIntensityLimitHigh: 1500);
+
+            //var lowFreqNoiseSpectrum = SimulatedData.BuildLowFrequencyNoiseSpectrum(noiseParams);
+            //mzArrayList.Add(lowFreqNoiseSpectrum.XArray);
+            //intensityArrayList.Add(lowFreqNoiseSpectrum.YArray.Select(d => (int)d).ToArray());
+        }
+
+        [Test]
+        public static void GetEnvelopePlotsTest()
+        {
+            //colors ??= new[] { "#a51c30", "#74121d", "#580c1f"};
+            string[] colors = new[] { "#fb747d", "#e30613", "#77030b" };
+
+            var experimentalSpectraFile = MsDataFileReader.GetDataFile(@"C:\Users\Alex\Documents\TopDownVision\02-18-20_jurkat_td_rep2_fract5-AveragedHistone.raw");
+            experimentalSpectraFile.LoadAllStaticData();
+            var expSpectrum = experimentalSpectraFile.Scans.First().MassSpectrum;
+
+            var scan = new MsDataScan(massSpectrum: expSpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: expSpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 763.75, isolationWidth: 2.4);
+
+            DeconvolutionParameters isoDecParams = new IsoDecDeconvolutionParameters(reportMultipleMonoisos: false);
+
+            var precursors = new List<IsotopicEnvelope>();
+            precursors.AddRange(scan.GetIsolatedMassesAndCharges(scan.MassSpectrum, isoDecParams).OrderBy(e => e.MostAbundantObservedIsotopicMass));
+            var deconvolutedMonoisotopicMasses = precursors.Select(p => p.MonoisotopicMass).OrderBy(d => d).Distinct().ToList();
+            var deconvolutedMzs = deconvolutedMonoisotopicMasses.Select(m => m.ToMz(18)).ToList();
+            var estimatedMostAbundantMzs = deconvolutedMzs.Select(m => m + 0.445768).ToList();
+
+
+            List<GenericChart> plots = new List<GenericChart>();
+            for (int i = 2; i < 5; i++)
+            {
+                List<double> xs = new();
+                List<double> ys = new();
+                for (int j = 0; j < precursors[i].Peaks.Count; j++)
+                {
+                    if (precursors[i].Peaks[j].mz < 764.9)
+                    {
+                        xs.Add(precursors[i].Peaks[j].mz);
+                        ys.Add(precursors[i].Peaks[j].intensity);
+                    }
+                }
+                //double[] xArray = precursors[i].Peaks.Select(p => p.mz).ToArray();
+                plots.Add(GetSpectrumPlot(
+                    xs.ToArray(),
+                    ys.ToArray(),
+                    color: colors[i - 2],
+                    opacity: 1,
+                    mirror: true,
+                    maxIntensity: scan.MassSpectrum.YofPeakWithHighestY));
+            }
+
+            //return plots;
+        }
+
+        public static List<GenericChart> GetEnvelopePlots(string[] colors = null)
+        {
+            //colors ??= new[] { "#a51c30", "#74121d", "#580c1f"};
+            colors ??= new[] { "#fb747d", "#e30613", "#77030b" };
+
+            var experimentalSpectraFile = MsDataFileReader.GetDataFile(@"C:\Users\Alex\Documents\TopDownVision\02-18-20_jurkat_td_rep2_fract5-AveragedHistone.raw");
+            experimentalSpectraFile.LoadAllStaticData();
+            var expSpectrum = experimentalSpectraFile.Scans.First().MassSpectrum;
+
+            var scan = new MsDataScan(massSpectrum: expSpectrum, oneBasedScanNumber: 1, msnOrder: 1, isCentroid: true,
+                polarity: Polarity.Positive, retentionTime: 1, scanWindowRange: new MzRange(400, 1600), scanFilter: "f",
+                mzAnalyzer: MZAnalyzerType.Orbitrap, totalIonCurrent: expSpectrum.SumOfAllY, injectionTime: 1.0, noiseData: null, nativeId: "scan=" + (1),
+                isolationMZ: 763.75, isolationWidth: 2.4);
+
+            DeconvolutionParameters isoDecParams = new IsoDecDeconvolutionParameters(reportMultipleMonoisos: false);
+
+            var precursors = new List<IsotopicEnvelope>();
+            precursors.AddRange(scan.GetIsolatedMassesAndCharges(scan.MassSpectrum, isoDecParams).OrderBy(e => e.MostAbundantObservedIsotopicMass));
+            var deconvolutedMonoisotopicMasses = precursors.Select(p => p.MonoisotopicMass).OrderBy(d => d).Distinct().ToList();
+            var deconvolutedMzs = deconvolutedMonoisotopicMasses.Select(m => m.ToMz(18)).ToList();
+            var estimatedMostAbundantMzs = deconvolutedMzs.Select(m => m + 0.445768).ToList();
+
+
+            List<GenericChart> plots = new List<GenericChart>();
+            for (int i = 2; i < 5; i++)
+            {
+                List<double> xs = new();
+                List<double> ys = new();
+                for (int j = 0; j < precursors[i].Peaks.Count; j++)
+                {
+                    if (precursors[i].Peaks[j].mz < 764.9)
+                    {
+                        xs.Add(precursors[i].Peaks[j].mz);
+                        ys.Add(precursors[i].Peaks[j].intensity);
+                    }
+                } 
+                //double[] xArray = precursors[i].Peaks.Select(p => p.mz).ToArray();
+                plots.Add(GetSpectrumPlot(
+                    xs.ToArray(),
+                    ys.ToArray(),
+                    color: colors[i-2],
+                    opacity: 1,
+                    mirror: true,
+                    maxIntensity: scan.MassSpectrum.YofPeakWithHighestY));
+            }
+
+            return plots;
+        }
+
+
+        public static GenericChart GetSpectrumPlot(double[] xArray, double[] yArray, string color = "red", double opacity = 0.8, bool mirror = false,
+            double scalingFactor = 1, bool experimental = false, double? maxIntensity = null)
+        {
+            //filtering step
+            List<double> xList = new();
+            List<double> yList =new();
+            for (int i = 0; i < yArray.Length; i++)
+            {
+                if (xArray[i] > 754 & xArray[i] < 776)
+                {
+                    xList.Add(xArray[i]);
+                    yList.Add(yArray[i]);
+                }
+                
+            }
+            xArray = xList.ToArray();
+            yArray = yList.ToArray();
+
+
+            double[] plotMz = new double[xArray.Length * 3];
+            double[] plotIntensity = new double[yArray.Length * 3];
+            maxIntensity ??= yArray.Max();
+
+            for (int i = 0; i < xArray.Length; i++)
+            {
+                int first = (3 * i);
+                int second = (3 * i + 1);
+                int third = (3 * i + 2);
+
+                plotMz[first] = xArray[i] - 0.00001;
+                plotIntensity[first] = 0;
+
+                plotMz[second] = xArray[i];
+                plotIntensity[second] = Math.Max(0, yArray[i]) * 100 * scalingFactor / (double)maxIntensity;
+                if (mirror) plotIntensity[second] *= -1;
+
+                plotMz[third] = xArray[i] + 0.00001;
+                plotIntensity[third] = 0;
+            }
+
+            return Chart.Line<double, double, string>(plotMz, plotIntensity, LineColor: Plotly.NET.Color.fromString(color), Opacity: opacity)
+                .WithTitle("Theoretical Envelope")
+                .WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("#e4e5ed")))
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance") )
+                .WithLineStyle(Width: 3)
+                //.WithSize(Width: 3000, Height: 1600);
+                .WithSize(Width: 750, Height: 400);
+        }
 
 
         public static void PopulateArrayLists(List<double[]> mzArrayList, List<int[]> intensityArrayList, List<PeptideWithSetModifications> forms, List<double> intensities, 
-            HashSet<int> alreadyObservedMasses, double baseScalingFactor = 75000)
+            HashSet<int> alreadyObservedMasses, double baseScalingFactor = 75000, double customScalingFactor = 0.05, bool prosight = false, bool meta = false)
         {
             for (int i = 0; i < forms.Count; i++)
             {
@@ -321,10 +486,50 @@ namespace Test.FileReadingTests
                         {
                             randomScalingFactor *= 0.2;
                         }
+                        else if (meta || prosight)
+                        {
+                            
+                            randomScalingFactor *= customScalingFactor/2;
+                        }
                         else
                         {
-                            randomScalingFactor *= 0.05;
+                            randomScalingFactor *= customScalingFactor;
                         }
+                    }
+
+                    if (z == 15)
+                    {
+                        double mostAbundant = dist.MostAbundantMass.ToMz(15);
+                        if (Math.Abs(mostAbundant - 754.7) < 0.1)
+                        {
+                            randomScalingFactor *= 0.5;
+
+                        }
+                        else if (Math.Abs(mostAbundant - 755.63) < 0.1)
+                        {
+                            randomScalingFactor *= 0.1;
+                        }
+                        else if (Math.Abs(mostAbundant - 756.56) < 0.1)
+                        {
+                            randomScalingFactor *= 0.2;
+                        }
+                        else if (Math.Abs(mostAbundant - 756.36) < 0.1)
+                        {
+                            randomScalingFactor *= 0.2;
+                        }
+                        else if (prosight && Math.Abs(mostAbundant - 757.52) < 0.1)
+                        {
+                            randomScalingFactor *= 0.1;
+                        }
+                        else if (Math.Abs(mostAbundant - 760.00) < 0.1)
+                        {
+                            randomScalingFactor *= 0.5;
+                        }
+                    }
+
+                    if (z == 14)
+                    {
+                        randomScalingFactor *= 0.3;
                     }
 
                     // unmodified
@@ -483,34 +688,7 @@ namespace Test.FileReadingTests
             //    .Show();
         }
 
-        public static GenericChart GetSpectrumPlot(double[] xArray, double[] yArray, string color = "red")
-        {
-            double[] plotMz = new double[xArray.Length * 3];
-            double[] plotIntensity = new double[yArray.Length * 3];
-
-            for (int i = 0; i < xArray.Length; i++)
-            {
-                int first = (3 * i);
-                int second = (3 * i + 1);
-                int third = (3 * i + 2);
-
-                plotMz[first] = xArray[i] - 0.00001;
-                plotIntensity[first] = 0;
-
-                plotMz[second] = xArray[i];
-                plotIntensity[second] = Math.Max(0, yArray[i]);
-
-                plotMz[third] = xArray[i] + 0.00001;
-                plotIntensity[third] = 0;
-            }
-
-            return Chart.Line<double, double, string>(plotMz, plotIntensity, LineColor: Plotly.NET.Color.fromString(color))
-                .WithTitle("Theoretical Envelope")
-                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
-                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Intensity"))
-                .WithSize(Width: 1000, Height: 500);
-        }
-
+        
         [Test]
         public static void Ms1Example()
         {
