@@ -268,8 +268,9 @@ namespace Test.FileReadingTests
             var expPlot = GetSpectrumPlot(expSpectrum.XArray, expSpectrum.YArray, color: "black", opacity: 0.8, mirror: true);
 
             var envelopePlots = GetEnvelopePlots();
-            
-            var combinedChart = Chart.Combine(new[] {   prosightPlot, mmPlot, sharedPlot, expPlot, envelopePlots[0], envelopePlots[1], envelopePlots[2] });
+
+            //var combinedChart = Chart.Combine(new[] {   prosightPlot, mmPlot, sharedPlot, expPlot, envelopePlots[0], envelopePlots[1], envelopePlots[2] });
+            var combinedChart = Chart.Combine(new[] { sharedPlot, expPlot, envelopePlots[0], envelopePlots[1], envelopePlots[2] });
 
             GenericChartExtensions.Show(combinedChart);
 
@@ -429,7 +430,7 @@ namespace Test.FileReadingTests
 
             return Chart.Line<double, double, string>(plotMz, plotIntensity, LineColor: Plotly.NET.Color.fromString(color), Opacity: opacity)
                 .WithTitle("Theoretical Envelope")
-                .WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("#e4e5ed")))
+                .WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
                 .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("m/z"))
                 .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance") )
                 .WithLineStyle(Width: 3)
