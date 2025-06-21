@@ -1,4 +1,5 @@
 ﻿using Chemistry;
+using FlashLFQ;
 using MassSpectrometry;
 using MathNet.Numerics.Distributions;
 using MzIdentML;
@@ -16,10 +17,14 @@ using System.IO;
 using System.Linq;
 using System.Printing;
 using System.Windows.Documents;
+using System.Xml.Serialization;
 using static Plotly.NET.StyleParam.DrawingStyle;
 using Chart = Plotly.NET.CSharp.Chart;
 using GenericChartExtensions = Plotly.NET.CSharp.GenericChartExtensions;
 using Stopwatch = System.Diagnostics.Stopwatch;
+using Peptide = Proteomics.AminoAcidPolymer.Peptide;
+using IsotopicEnvelope = MassSpectrometry.IsotopicEnvelope;
+using System.Printing.Interop;
 
 namespace Test.FileReadingTests
 {
@@ -68,9 +73,14 @@ namespace Test.FileReadingTests
             int mixedDecoyRealModPeaks = 0;
             int successfulDisambiguations = 0;
             int totalDecoyMods = 0;
+            List<QuantifiedPeak> realPeaks = new List<QuantifiedPeak>();
             foreach (var peak in peaks)
             {
-                if (!peak.FullSequence.Contains(":Decoy")) continue;
+                if (!peak.FullSequence.Contains(":Decoy") && peak.FileName.Contains("jurkat_td_rep2_fract5") )
+                {
+                    realPeaks.Add(peak);
+                }
+
                 if (peak.BestMatchingSequence.Contains(":Decoy"))
                 {
                     totalDecoyMods++;
@@ -84,8 +94,66 @@ namespace Test.FileReadingTests
                 }
             }
 
-            int placeholder = 0;
+            
+
+            var mostIntensePeak = realPeaks.First(p => p.FullSequence == "PELAKSAPAPKKGSKKAVTKAQKKDGKKRKRSRKESYSVYVYKVLKQVHPDTGISSKAMGIMNSFVNDIFERIASEASRLAHYNKRSTITSREIQTAVRLLLPGELAKHAVSEGTKAVTKYTSSK");
+            List<double> mzChannels = new List<double>();
+            for (int i = 0; i < 5; i++)
+            {
+                double baseMz = (double)mostIntensePeak.PeakMz;
+                double isotopeSpacing = 1.0 / (double)mostIntensePeak.PeakCharge;
+                double isotopeDeltaMz = isotopeSpacing * (i - 2);
+                // Add the mz for the current isotope channel
+                mzChannels.Add(baseMz + isotopeDeltaMz);
+            }
+
+            var datafile = MsDataFileReader.GetDataFile(@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract5.raw");
+            var indexingEngine = PeakIndexingEngine.InitializeIndexingEngine(datafile);
+
+            var tol = new PpmTolerance(10);
+            List<GenericChart> xicPlots = new List<GenericChart>();
+            foreach (var mz in mzChannels)
+            {
+                var xic = indexingEngine.GetXic(mz, (double)mostIntensePeak.PeakRTApex, tol, missedScansAllowed: 10, maxPeakHalfWidth: 5);
+                xicPlots.Add(GetXicChart(xic));
+            }
+
+            GenericChartExtensions.Show(Chart.Combine(xicPlots));
         }
+
+        [Test]
+        public static void SimulatedXIC()
+        {
+            var peakShapeAlgorithm = new PeakShapeAlgorithm(frontingFactor: 0.252, tailingFactor: 0.002, heightFactor: 400);
+            List<double> retentionTimes = Enumerable.Range(0, 20).Select(i => i * 0.1 + 39.5).ToList(); // Simulated retention times in minutes
+            List<double> intensities = peakShapeAlgorithm.GetIntensityRange(40.10, retentionTimes);
+
+            var chart = Chart.Line<double, double, string>(retentionTimes.ToArray(), intensities.ToArray())
+                .WithTitle("XIC")
+                //.WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("RT (min)"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance"))
+                .WithLineStyle(Width: 3)
+                //.WithSize(Width: 3000, Height: 1600);
+                .WithSize(Width: 750, Height: 400);
+            GenericChartExtensions.Show(chart);
+        }
+
+        public static GenericChart GetXicChart(List<IIndexedPeak> peaks)
+        {
+            var xarray = peaks.Select(peak => peak.RetentionTime).ToArray();
+            var yarray = peaks.Select(peak => peak.Intensity).ToArray();
+
+            return Chart.Line<double, double, string>(xarray, yarray)
+                .WithTitle("XIC")
+                //.WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("RT (min)"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance"))
+                .WithLineStyle(Width: 3)
+                //.WithSize(Width: 3000, Height: 1600);
+                .WithSize(Width: 750, Height: 400);
+        }
+
 
         [Test]
         public static void GetIsoEnv()
