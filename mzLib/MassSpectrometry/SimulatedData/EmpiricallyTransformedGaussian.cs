@@ -1,0 +1,62 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace MassSpectrometry
+{
+    public class EmpiricallyTransformedGaussian
+    {
+        public double Height { get; set; } = 100.0;
+
+        public double FullWidthHalfMax { get; set; } = 0.25;
+
+        //Leading parameters
+
+        // Lambda / PreExponential Parameters. Smaller values = Thicker Peaks
+        // Kexp / Exponential Parameters. Smaller values = Thicker Peaks
+
+        public double LambdaLeading { get; set; } = 5;
+        public double KexpLeading { get; set; } = 15;  
+        public double AlphaLeading { get; set; } = 10;
+
+        // Tailing Parameters
+        public double LambdaTailing { get; set; } = 5;
+        public double KexpTailing { get; set; } = 15;
+        public double AlphaTailing { get; set; } = 10;
+
+        public EmpiricallyTransformedGaussian() { // Default constructor with default values
+        }
+
+        public double GetIntensity(double rt, double apexRt)
+        { 
+            double halfMaxRtLeading = apexRt - FullWidthHalfMax / 2;
+            double halfMaxRtTailing = apexRt + FullWidthHalfMax / 2;
+
+            // Calculate the peak shape based on the relative retention time
+            double leadingTerm = 1 + LambdaLeading * Math.Exp(KexpLeading * (halfMaxRtLeading - rt));
+            double leadingTermPower = Math.Pow(halfMaxRtLeading / rt, AlphaLeading);
+
+            double tailingTerm = 1 + LambdaTailing * Math.Exp(KexpTailing * (rt - halfMaxRtTailing));
+            double tailingTermPower = Math.Pow(rt / halfMaxRtTailing, AlphaTailing);
+
+            double denominator = Math.Pow(leadingTerm, leadingTermPower) + Math.Pow(tailingTerm, tailingTermPower) - 1;
+
+            return Height / denominator;
+        }
+
+        public List<double> GetIntensityRange(double apexRt, List<double> retentionTimes)
+        {
+            List<double> intensities = new List<double>();
+            foreach (var rt in retentionTimes)
+            {
+                double intensity = GetIntensity(rt, apexRt);
+                intensities.Add(intensity);
+            }
+            return intensities;
+        }
+
+
+    }
+}

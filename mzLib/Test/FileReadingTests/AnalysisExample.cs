@@ -25,6 +25,7 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 using Peptide = Proteomics.AminoAcidPolymer.Peptide;
 using IsotopicEnvelope = MassSpectrometry.IsotopicEnvelope;
 using System.Printing.Interop;
+using Microsoft.ML.Trainers;
 
 namespace Test.FileReadingTests
 {
@@ -138,6 +139,59 @@ namespace Test.FileReadingTests
                 .WithSize(Width: 750, Height: 400);
             GenericChartExtensions.Show(chart);
         }
+
+        [Test]
+        public static void SimulatedXICEmg()
+        {
+            var peakShapeAlgorithm = new EmgAlgorithm()
+            {
+                SkewFactor = -0.5, // Negative skew for fronting peak shape 
+                Intensity = 400,
+                StandardDeviation = 0.5
+            };
+            List<double> retentionTimes = Enumerable.Range(0, 20).Select(i => i * 0.1 + 39.5).ToList(); // Simulated retention times in minutes
+            List<double> intensities = peakShapeAlgorithm.GetIntensityRange(40.10, retentionTimes);
+
+            var chart = Chart.Line<double, double, string>(retentionTimes.ToArray(), intensities.ToArray())
+                .WithTitle("XIC")
+                //.WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("RT (min)"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance"))
+                .WithLineStyle(Width: 3)
+                //.WithSize(Width: 3000, Height: 1600);
+                .WithSize(Width: 750, Height: 400);
+            GenericChartExtensions.Show(chart);
+        }
+
+        [Test]
+        public static void SimulatedEtg()
+        {
+            var peakShapeAlgorithm = new EmpiricallyTransformedGaussian()
+            {
+                FullWidthHalfMax = 0.3,
+
+                LambdaLeading = 3,
+                KexpLeading = 5,
+                AlphaLeading = 0.5,
+
+                LambdaTailing = 5,
+                KexpTailing = 15,
+                AlphaTailing = 10
+            };
+            List<double> retentionTimes = Enumerable.Range(0, 1200).Select(i => i * 0.01 + 35).ToList(); // Simulated retention times in minutes
+            List<double> intensities = peakShapeAlgorithm.GetIntensityRange(40.10, retentionTimes);
+
+            var chart = Chart.Line<double, double, string>(retentionTimes.ToArray(), intensities.ToArray())
+                .WithTitle("XIC")
+                //.WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("RT (min)"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance"))
+                .WithLineStyle(Width: 3)
+                //.WithSize(Width: 3000, Height: 1600);
+                .WithSize(Width: 750, Height: 400);
+            GenericChartExtensions.Show(chart);
+        }
+
 
         public static GenericChart GetXicChart(List<IIndexedPeak> peaks)
         {
