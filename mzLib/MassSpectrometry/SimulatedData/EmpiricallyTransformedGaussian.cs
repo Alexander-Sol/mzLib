@@ -1,8 +1,11 @@
-﻿using System;
+﻿using MathNet.Numerics.LinearAlgebra;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using MathNet.Numerics.Interpolation;
+//using Vector = MathNet.Numerics.LinearAlgebra;
 
 namespace MassSpectrometry
 {
@@ -18,7 +21,7 @@ namespace MassSpectrometry
         // Kexp / Exponential Parameters. Smaller values = Thicker Peaks
 
         public double LambdaLeading { get; set; } = 5;
-        public double KexpLeading { get; set; } = 15;  
+        public double KexpLeading { get; set; } = 15;
         public double AlphaLeading { get; set; } = 10;
 
         // Tailing Parameters
@@ -29,8 +32,22 @@ namespace MassSpectrometry
         public EmpiricallyTransformedGaussian() { // Default constructor with default values
         }
 
+        public EmpiricallyTransformedGaussian(Vector<double> parameters)
+        {
+            if (parameters.Count != 7)
+                throw new ArgumentException("Expected 7 parameters: FullWidthHalfMax, 3 Leading parameters, and 3 Tailing parameters.");
+            
+            FullWidthHalfMax = parameters[0];
+            LambdaLeading = parameters[1];
+            KexpLeading = parameters[2];
+            AlphaLeading = parameters[3];
+            LambdaTailing = parameters[4];
+            KexpTailing = parameters[5];
+            AlphaTailing = parameters[6];
+        }
+
         public double GetIntensity(double rt, double apexRt)
-        { 
+        {
             double halfMaxRtLeading = apexRt - FullWidthHalfMax / 2;
             double halfMaxRtTailing = apexRt + FullWidthHalfMax / 2;
 
@@ -57,6 +74,50 @@ namespace MassSpectrometry
             return intensities;
         }
 
+        public static Vector<double> DefaultSettings = Vector<double>.Build.Dense(new[]
+        {
+            0.25, // FullWidthHalfMax
+            5.0,  // LambdaLeading
+            15.0, // KexpLeading
+            10.0, // AlphaLeading
+            5.0,  // LambdaTailing
+            15.0, // KexpTailing
+            10.0  // AlphaTailing
+        });
 
+        public static Func<Vector<double>, double> CreateObjectiveFunction(List<IIndexedPeak> indexedPeaks)
+        {
+            var maxIntensity = indexedPeaks.Max(p => p.Intensity);
+            var apexRt = indexedPeaks.MaxBy(p => p.Intensity).RetentionTime;
+            var spline = LinearSpline.Interpolate(indexedPeaks.Select(p => p.RetentionTime).ToArray(),
+                indexedPeaks.Select(p => 100 * p.Intensity / maxIntensity).ToArray());
+            Func<Vector<double>, double> objectiveFunction = (parameters) =>
+            {
+                if (parameters.Count != 7)
+                    throw new ArgumentException("Expected 7 parameters: FullWidthHalfMax, 3 Leading parameters, and 3 Tailing parameters.");
+                EmpiricallyTransformedGaussian etgAlgo = new EmpiricallyTransformedGaussian
+                {
+                    Height = 200.0,
+                    FullWidthHalfMax = parameters[0],
+                    LambdaLeading = parameters[1],
+                    KexpLeading = parameters[2],
+                    AlphaLeading = parameters[3],
+                    LambdaTailing = parameters[4],
+                    KexpTailing = parameters[5],
+                    AlphaTailing = parameters[6]
+                };
+
+                // Example calculation: return a simple function of the parameters
+                double sse = 0.0;
+                foreach (var peak in indexedPeaks)
+                {
+                    double simulatedIntensity = etgAlgo.GetIntensity(peak.RetentionTime, apexRt);
+                    sse += Math.Pow((100*peak.Intensity / maxIntensity) - simulatedIntensity, 2);
+                }
+
+                return sse;
+            };
+            return objectiveFunction;
+        }
     }
 }

@@ -2,8 +2,11 @@
 using FlashLFQ;
 using MassSpectrometry;
 using MathNet.Numerics.Distributions;
+using MathNet.Numerics.Optimization;
+using Microsoft.ML.Trainers;
 using MzIdentML;
 using MzLibUtil;
+using NetSerializer;
 using NUnit.Framework;
 using Plotly.NET;
 using Plotly.NET.CSharp;
@@ -16,16 +19,15 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Printing;
+using System.Printing.Interop;
 using System.Windows.Documents;
 using System.Xml.Serialization;
 using static Plotly.NET.StyleParam.DrawingStyle;
 using Chart = Plotly.NET.CSharp.Chart;
 using GenericChartExtensions = Plotly.NET.CSharp.GenericChartExtensions;
-using Stopwatch = System.Diagnostics.Stopwatch;
-using Peptide = Proteomics.AminoAcidPolymer.Peptide;
 using IsotopicEnvelope = MassSpectrometry.IsotopicEnvelope;
-using System.Printing.Interop;
-using Microsoft.ML.Trainers;
+using Peptide = Proteomics.AminoAcidPolymer.Peptide;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace Test.FileReadingTests
 {
@@ -69,6 +71,14 @@ namespace Test.FileReadingTests
         [Test]
         public static void AnalyzeFlashData()
         {
+
+            var messageTypes = new List<Type>
+            {
+                typeof(List<IndexedMassSpectralPeak>),
+                typeof(IndexedMassSpectralPeak)
+            };
+            var serializer = new Serializer(messageTypes);
+
             string dataPath = @"D:\JurkatTopdown\MM108_DecoyPTMs_MOxVariable\FlashLFQ_Tweaked\QuantifiedPeaks.tsv";
             var peaks = FileReader.ReadFile<QuantifiedPeakFile>(dataPath);
             int mixedDecoyRealModPeaks = 0;
@@ -113,14 +123,93 @@ namespace Test.FileReadingTests
 
             var tol = new PpmTolerance(10);
             List<GenericChart> xicPlots = new List<GenericChart>();
+            List<List<IIndexedPeak>> xics = new();
+
             foreach (var mz in mzChannels)
             {
                 var xic = indexingEngine.GetXic(mz, (double)mostIntensePeak.PeakRTApex, tol, missedScansAllowed: 10, maxPeakHalfWidth: 5);
-                xicPlots.Add(GetXicChart(xic));
+                xics.Add(xic);
+                //xicPlots.Add(GetXicChart(xic));
             }
 
-            GenericChartExtensions.Show(Chart.Combine(xicPlots));
+            
+            Dictionary<int, IIndexedPeak> summedXic = new Dictionary<int, IIndexedPeak>();
+            foreach (var xic in xics)
+            {
+                // Sum the intensity in each channel, then plot the summer xic
+                foreach(var peak in xic)
+                {
+                    if (!summedXic.ContainsKey(peak.ZeroBasedScanIndex))
+                    {
+                        summedXic[peak.ZeroBasedScanIndex] = peak;
+                    }
+                    else
+                    {
+                        var oldPeak = summedXic[peak.ZeroBasedScanIndex];
+                        IndexedMassSpectralPeak newPeak = new IndexedMassSpectralPeak(
+                            mz: (oldPeak.M + peak.M) / 2.0,
+                            intensity: oldPeak.Intensity + peak.Intensity,
+                            peak.ZeroBasedScanIndex,
+                            peak.RetentionTime);
+
+                        summedXic[peak.ZeroBasedScanIndex] = newPeak;
+                    }
+                }
+            }
+
+            using (var indexFile = File.Create(@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract5_HistoneXic.ind"))
+            {
+                serializer.Serialize(indexFile, summedXic.Values.OrderBy(p => p.ZeroBasedScanIndex).Cast<IndexedMassSpectralPeak>().ToList());
+            }
+
+            //GenericChartExtensions.Show(Chart.Combine(xicPlots));
+            GenericChartExtensions.Show(GetXicChart(summedXic.Values.OrderBy(p => p.ZeroBasedScanIndex).ToList()));
         }
+
+        [Test]
+        public static void LoadIndexedXic()
+        {
+            var messageTypes = new List<Type>
+            {
+                typeof(List<IndexedMassSpectralPeak>),
+                typeof(IndexedMassSpectralPeak)
+            };
+            var serializer = new Serializer(messageTypes);
+            string indexPath = @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract5_HistoneXic.ind";
+
+            List<IndexedMassSpectralPeak> indexedPeaks = null;
+
+            using (var indexFile = File.OpenRead(indexPath))
+            {
+                indexedPeaks = (List<IndexedMassSpectralPeak>)serializer.Deserialize(indexFile);
+            }
+
+            var iIndexedPeaks = indexedPeaks.Where(p => p.RetentionTime >= 39 & p.RetentionTime <= 41).Cast<IIndexedPeak>().ToList();
+
+            var nelderMead = new NelderMeadSimplex(0.01, 1000);
+            double apexRt = iIndexedPeaks.MaxBy(p => p.Intensity).RetentionTime;
+
+            EmpiricallyTransformedGaussian.CreateObjectiveFunction(iIndexedPeaks);
+            var minimizationResults = nelderMead.FindMinimum(ObjectiveFunction.Value(EmpiricallyTransformedGaussian.CreateObjectiveFunction(iIndexedPeaks)),
+                EmpiricallyTransformedGaussian.DefaultSettings);
+
+            var etg = new EmpiricallyTransformedGaussian(minimizationResults.MinimizingPoint);
+            etg.Height = 200.0;
+            double[] etgx = new double[iIndexedPeaks.Count];
+            double[] etgy = new double[iIndexedPeaks.Count];
+            for (int i = 0; i < iIndexedPeaks.Count; i++)
+            {
+                etgx[i] = iIndexedPeaks[i].RetentionTime;
+                etgy[i] = etg.GetIntensity(iIndexedPeaks[i].RetentionTime, apexRt);
+            }
+
+            var empiricalChart = GetXicChart(iIndexedPeaks);
+            var etgChare = GetXicChart(etgx, etgy);
+
+            GenericChartExtensions.Show(Chart.Combine( new List<GenericChart> { empiricalChart, etgChare}));
+        }
+
+
 
         [Test]
         public static void SimulatedXIC()
@@ -190,14 +279,33 @@ namespace Test.FileReadingTests
                 //.WithSize(Width: 3000, Height: 1600);
                 .WithSize(Width: 750, Height: 400);
             GenericChartExtensions.Show(chart);
+
+            EmpiricallyTransformedGaussian.CreateObjectiveFunction(new List<IIndexedPeak>()); // This is just to test the static method, not used in this example
+
+            //IObjectiveFunction scalarObj = ObjectiveFunction.ScalarValue();
         }
+
+
 
 
         public static GenericChart GetXicChart(List<IIndexedPeak> peaks)
         {
+            double maxIntensity = peaks.Max(peak => peak.Intensity);
             var xarray = peaks.Select(peak => peak.RetentionTime).ToArray();
-            var yarray = peaks.Select(peak => peak.Intensity).ToArray();
+            var yarray = peaks.Select(peak => 100* peak.Intensity / maxIntensity).ToArray();
 
+            return Chart.Line<double, double, string>(xarray, yarray)
+                .WithTitle("XIC")
+                //.WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
+                .WithXAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("RT (min)"))
+                .WithYAxisStyle<double, double, string>(Title: Plotly.NET.Title.init("Relative Abundance"))
+                .WithLineStyle(Width: 3)
+                //.WithSize(Width: 3000, Height: 1600);
+                .WithSize(Width: 750, Height: 400);
+        }
+
+        public static GenericChart GetXicChart(double[] xarray, double[] yarray)
+        {
             return Chart.Line<double, double, string>(xarray, yarray)
                 .WithTitle("XIC")
                 //.WithLayout(Layout.init<IConvertible>(PlotBGColor: Plotly.NET.Color.fromString("white")))
