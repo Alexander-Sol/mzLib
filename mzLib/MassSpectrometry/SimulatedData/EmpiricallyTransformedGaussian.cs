@@ -85,6 +85,12 @@ namespace MassSpectrometry
             10.0  // AlphaTailing
         });
 
+        /// <summary>
+        /// This method creates an objective function for optimization based on the indexed peaks.
+        /// </summary>
+        /// <param name="indexedPeaks"></param>
+        /// <returns></returns>
+        /// <exception cref="ArgumentException"></exception>
         public static Func<Vector<double>, double> CreateObjectiveFunction(List<IIndexedPeak> indexedPeaks)
         {
             var maxIntensity = indexedPeaks.Max(p => p.Intensity);

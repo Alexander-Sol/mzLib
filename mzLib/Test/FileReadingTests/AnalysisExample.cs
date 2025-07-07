@@ -206,7 +206,7 @@ namespace Test.FileReadingTests
             var empiricalChart = GetXicChart(iIndexedPeaks);
             var etgChare = GetXicChart(etgx, etgy);
 
-            GenericChartExtensions.Show(Chart.Combine( new List<GenericChart> { empiricalChart, etgChare}));
+            GenericChartExtensions.Show(Chart.Combine( new List<GenericChart> { empiricalChart}));
         }
 
 
