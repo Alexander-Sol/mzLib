@@ -18,7 +18,7 @@ namespace Test
     {
         public static MsDataScan[] FakeScans { get; set; }
         public static IsotopicDistribution Dist { get; set; }
-        public static List<IIndexedPeak> PeakList { get; set; } 
+        public static List<IndexedMassSpectralPeak> PeakList { get; set; } 
 
         [OneTimeSetUp]
         public void OneTimeSetup()
@@ -45,13 +45,14 @@ namespace Test
 
             //Example XIC
             var peakIndexEngine = PeakIndexingEngine.InitializeIndexingEngine(FakeScans);
+            var x = peakIndexEngine.GetXic(Dist.Masses.First().ToMz(1), zeroBasedStartIndex: 4, new PpmTolerance(20), 1);
             PeakList = peakIndexEngine.GetXic(Dist.Masses.First().ToMz(1), zeroBasedStartIndex: 4, new PpmTolerance(20), 1);
         }
 
         [Test]
         public static void TestXicConstruction()
         {
-            var xic = new ExtractedIonChromatogram(PeakList);
+            var xic = new ExtractedIonChromatogram<IndexedMassSpectralPeak>(PeakList);
 
             //Test XIC properties
             Assert.That(xic.Peaks.Count, Is.EqualTo(10));
@@ -71,7 +72,7 @@ namespace Test
         [Test]
         public static void TestXicSpline()
         {
-            var xic = new ExtractedIonChromatogram(PeakList);
+            var xic = new ExtractedIonChromatogram<IndexedMassSpectralPeak>(PeakList);
 
             //Test XIC spline
             //in retention time
@@ -99,7 +100,7 @@ namespace Test
                 peakList1.Add(new IndexedMassSpectralPeak(intensity: 1e5 * intensityMultipliers[i], retentionTime: 1 + i / 10, zeroBasedScanIndex: i + 5, mz: 500.0));
             }
             //The xic contains three original peaks, and we want to add two more peaks at the begining and the end. This setting of spline only adds peaks, no spline.
-            var xic1 = new ExtractedIonChromatogram(peakList1);
+            var xic1 = new ExtractedIonChromatogram<IIndexedPeak>(peakList1);
             int numberOfPeaksToAdd = 2;
             var linearSpline2 = new XicLinearSpline(1, numberOfPeaksToAdd, 1);
             linearSpline2.SetXicSplineXYData(xic1, cycle: true);
@@ -215,13 +216,13 @@ namespace Test
             {
                 peak1.Add(new IndexedMassSpectralPeak(intensity: intensities[i] * 10, retentionTime: RTs[i], zeroBasedScanIndex: i, mz: 500.0));
             }
-            var xic1 = new ExtractedIonChromatogram(peak1);
+            var xic1 = new ExtractedIonChromatogram<IIndexedPeak>(peak1);
             var peak2 = new List<IIndexedPeak>();
             for (int i = 0; i < RTs.Length - 1; i++)
             {
                 peak2.Add(new IndexedMassSpectralPeak(intensity: intensities[i], retentionTime: RTs[RTs.Length - 1] + (i + 1) * 0.5, zeroBasedScanIndex: i + RTs.Length, mz: 500.0));
             }
-            var xic = new ExtractedIonChromatogram(peak1.Concat(peak2).OrderBy(p => p.RetentionTime).ToList());
+            var xic = new ExtractedIonChromatogram<IIndexedPeak>(peak1.Concat(peak2).OrderBy(p => p.RetentionTime).ToList());
             Assert.That(xic.Peaks.Count, Is.EqualTo(peak1.Count + peak2.Count));
             xic.CutPeak();
             Assert.That(xic.Peaks.Count, Is.EqualTo(peak1.Count));
@@ -234,7 +235,7 @@ namespace Test
             Assert.That(xic1.Peaks.Count, Is.EqualTo(peak1.Count));
 
             //if the number of peaks is smaller than 5, it should not be cut
-            var xic2 = new ExtractedIonChromatogram(peak1.Take(3).ToList());
+            var xic2 = new ExtractedIonChromatogram<IIndexedPeak>(peak1.Take(3).ToList());
             xic2.CutPeak();
             Assert.That(xic2.Peaks.Count, Is.EqualTo(3));
 
@@ -245,7 +246,7 @@ namespace Test
             {
                 peak3.Add(new IndexedMassSpectralPeak(intensity: intensities[intensities.Length - 1] + intensityIncrement * i, retentionTime: RTs[RTs.Length - 1] + (i + 1) * 0.5, zeroBasedScanIndex: i, mz: 500.0));
             }
-            var xic3 = new ExtractedIonChromatogram(peak1.Concat(peak3).OrderBy(p => p.RetentionTime).ToList());
+            var xic3 = new ExtractedIonChromatogram<IIndexedPeak>(peak1.Concat(peak3).OrderBy(p => p.RetentionTime).ToList());
             Assert.That(xic3.Peaks.Count, Is.EqualTo(peak1.Count + peak3.Count));
             xic3.CutPeak();
             Assert.That(xic3.Peaks.Count, Is.EqualTo(peak1.Count + peak3.Count));

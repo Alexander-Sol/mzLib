@@ -11,7 +11,7 @@ using System.Reflection;
 
 namespace FlashLFQ
 {
-    public class PeakIndexingEngine : IndexingEngine<IndexedMassSpectralPeak>
+    public class PeakIndexingEngine : IndexingEngine<IndexedMassSpectralPeak>, IFlashLfqIndexingEngine
     {
         private readonly Serializer _serializer;
         public SpectraFileInfo SpectraFile { get; private set; }
@@ -128,6 +128,16 @@ namespace FlashLFQ
                 }
             }
             IndexedPeaks = indexedPeaks;
+        }
+
+        IIndexedPeak IFlashLfqIndexingEngine.GetIndexedPeak(double mz, int zeroBasedScanIndex, Tolerance tolerance, int? charge)
+        {
+            return GetIndexedPeak(mz, zeroBasedScanIndex, tolerance, charge);
+        }
+
+        public List<IIndexedPeak> GetXic(double mz, double retentionTime, Tolerance ppmTolerance, int missedScansAllowed, double maxPeakHalfWidth = 2147483647, int? charge = null, Dictionary<IIndexedPeak, ExtractedIonChromatogram<IIndexedPeak>> matchedPeaks = null)
+        {
+            return GetXic(mz, retentionTime, ppmTolerance, missedScansAllowed, maxPeakHalfWidth);
         }
     }
 }

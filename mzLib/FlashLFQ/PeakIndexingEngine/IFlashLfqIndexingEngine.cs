@@ -10,7 +10,10 @@ namespace FlashLFQ.Interfaces
 {
     /// <summary>
     /// FlashLFQ requires indexing engines to IndexPeaks, serialize and deserialize indexed peaks,
-    /// and retrieve specific peaks (m/z, index pair) or xics (m/z at and around a given retention time
+    /// and retrieve specific peaks (m/z, index pair) or xics (m/z at and around a given retention time.
+    /// 
+    /// This interface defines the minimum behaviour required by flashLFQ. It can be implemented by a class that inherits from IndexingEngine,
+    /// but the interface enables additional flexibility that is required to index timsTOF data, even though this results in a complicated inheritance structure 
     /// </summary>
     public interface IFlashLfqIndexingEngine
     {
@@ -22,8 +25,7 @@ namespace FlashLFQ.Interfaces
         /// <param name="mz"> the m/z of the peak to be searched for </param>
         /// <param name="zeroBasedScanIndex"> the zero based index of the scan where the peak is to be found </param>
         /// <param name="charge"> an optional parameter used only for IIndexedMass and massIndexingEngine; must be null for mz peak indexing </param>
-        public TIndexedPeak GetIndexedPeak<TIndexedPeak>(double mz, int zeroBasedScanIndex, Tolerance tolerance, int? charge = null) 
-            where TIndexedPeak : IIndexedPeak;
+        public IIndexedPeak GetIndexedPeak(double mz, int zeroBasedScanIndex, Tolerance tolerance, int? charge = null);
 
         /// <summary>
         /// A generic method of peak tracing across the retention time. Finds peaks with a given mz that occur on either side of a given

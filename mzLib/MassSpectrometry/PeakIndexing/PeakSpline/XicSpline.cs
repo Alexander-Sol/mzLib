@@ -43,7 +43,7 @@ namespace MassSpectrometry
         /// <summary>
         /// Set the XYData field of an ExtractedIonChromatogram object as the result of spline.
         /// </summary>
-        public void SetXicSplineXYData(ExtractedIonChromatogram<IIndexedPeak> xic, bool cycle = false, double start = -1, double end = -1)
+        public void SetXicSplineXYData<T>(ExtractedIonChromatogram<T> xic, bool cycle = false, double start = -1, double end = -1) where T : IIndexedPeak
         {
             float[] peakRts = null;
             if (cycle)
