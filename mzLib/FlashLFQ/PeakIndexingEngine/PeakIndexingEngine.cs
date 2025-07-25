@@ -11,7 +11,7 @@ using System.Reflection;
 
 namespace FlashLFQ
 {
-    public class PeakIndexingEngine : IndexingEngine<IndexedMassSpectralPeak>, IFlashLfqIndexingEngine
+    public class PeakIndexingEngine : IndexingEngine<IndexedMassSpectralPeak>
     {
         private readonly Serializer _serializer;
         public SpectraFileInfo SpectraFile { get; private set; }

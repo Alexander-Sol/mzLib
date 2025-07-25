@@ -22,7 +22,9 @@ namespace FlashLFQ.Interfaces
         /// <param name="mz"> the m/z of the peak to be searched for </param>
         /// <param name="zeroBasedScanIndex"> the zero based index of the scan where the peak is to be found </param>
         /// <param name="charge"> an optional parameter used only for IIndexedMass and massIndexingEngine; must be null for mz peak indexing </param>
-        public IIndexedPeak GetIndexedPeak(double mz, int zeroBasedScanIndex, Tolerance tolerance, int? charge = null);
+        public TIndexedPeak GetIndexedPeak<TIndexedPeak>(double mz, int zeroBasedScanIndex, Tolerance tolerance, int? charge = null) 
+            where TIndexedPeak : IIndexedPeak;
+
         /// <summary>
         /// A generic method of peak tracing across the retention time. Finds peaks with a given mz that occur on either side of a given
         /// retention time. Peak searching iterates backwards through the scans until the peak 
@@ -37,7 +39,7 @@ namespace FlashLFQ.Interfaces
         /// <param name="matchedPeaks"> the dictionary that stores all the peaks already matched to an xic </param>
         /// <param name="charge"> an optional parameter used only for IIndexedMass and massIndexingEngine; must be null for mz peak indexing </param>
         /// <returns> A list of IIndexedPeak objects, ordered by retention time </returns>
-        public List<IIndexedPeak> GetXic(double mz, double retentionTime, Tolerance ppmTolerance, int missedScansAllowed, double maxPeakHalfWidth = int.MaxValue, int? charge = null, Dictionary<IIndexedPeak, ExtractedIonChromatogram> matchedPeaks = null);
+        public List<IIndexedPeak> GetXic(double mz, double retentionTime, Tolerance ppmTolerance, int missedScansAllowed, double maxPeakHalfWidth = int.MaxValue, int? charge = null, Dictionary<IIndexedPeak, ExtractedIonChromatogram<IIndexedPeak>> matchedPeaks = null);
         /// <summary>
         /// Clear the indexed peaks and the jagged array of indexed peaks to free up memory
         /// </summary>

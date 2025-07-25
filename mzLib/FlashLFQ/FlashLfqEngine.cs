@@ -46,7 +46,7 @@ namespace FlashLFQ
         /// peptide-level FDR filtering
         /// </summary>
         internal HashSet<string> PeptideModifiedSequencesToQuantify { get; init; }
-        internal Dictionary<SpectraFileInfo, IFlashLfqIndexingEngine> IndexingEngineDictionary { get; private set; }
+        internal Dictionary<SpectraFileInfo, PeakIndexingEngine> IndexingEngineDictionary { get; private set; }
         internal Dictionary<SpectraFileInfo, List<ChromatographicPeak>> DonorFileToPeakDict { get; private set; }
         /// <summary>
         /// a flag used to indicate if the isobaric case is running, used to control the indexEngine

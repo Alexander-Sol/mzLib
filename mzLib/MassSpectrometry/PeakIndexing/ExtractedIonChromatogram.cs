@@ -1,6 +1,7 @@
 ﻿using Easy.Common.Extensions;
 using MathNet.Numerics.Interpolation;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -13,9 +14,9 @@ namespace MassSpectrometry
     /// <summary>
     /// A generic XIC class for all IIndexedPeak objects (mz peak, isotopic envelope, etc.) that can be traced across retention time.
     /// </summary>
-    public class ExtractedIonChromatogram
+    public class ExtractedIonChromatogram<T> : IEnumerable<T> where T : IIndexedPeak
     {
-        public virtual List<IIndexedPeak> Peaks { get; set; }
+        public virtual List<T> Peaks { get; set; }
 
         public double ApexRT;
         public int ApexScanIndex;
@@ -38,7 +39,7 @@ namespace MassSpectrometry
             return averagedM;
         }
 
-        public ExtractedIonChromatogram(List<IIndexedPeak> peaks)
+        public ExtractedIonChromatogram(List<T> peaks)
         {
             Peaks = peaks;
             SetRtInfo();
@@ -58,21 +59,21 @@ namespace MassSpectrometry
         /// <param name="apexTimepointIndex">The index of the apex (most intense, best, whatever) in the list of time points.</param>
         /// <param name="discriminationFactorToCutPeak">The discrimination factor to determine if the peak should be cut. Default is 0.6.</param>
         /// <returns>True if the peak should be cut, otherwise false.</returns>
-        public static List<IIndexedPeak> FindPeakBoundaries(List<IIndexedPeak> timePoints, int apexTimepointIndex, double discriminationFactorToCutPeak = 0.6)
+        public static List<T> FindPeakBoundaries(List<T> timePoints, int apexTimepointIndex, double discriminationFactorToCutPeak = 0.6)
         {
-            List<IIndexedPeak> peakBoundaries = new List<IIndexedPeak>();
+            List<T> peakBoundaries = new List<T>();
             HashSet<int> zeroIndexedScanNumbers = timePoints.Select(p => p.ZeroBasedScanIndex).ToHashSet();
 
             // -1 checks the left side, +1 checks the right side
             int[] directions = { -1, 1 };
             foreach (int direction in directions)
             {
-                IIndexedPeak valley = null;
+                T valley = default(T);
                 int indexOfValley = 0;
 
                 for (int i = apexTimepointIndex + direction; i < timePoints.Count && i >= 0; i += direction)
                 {
-                    IIndexedPeak timepoint = timePoints[i];
+                    T timepoint = timePoints[i];
 
                     // Valley envelope is the lowest intensity point that has been encountered thus far
                     if (valley == null || timepoint.Intensity < valley.Intensity)
@@ -88,7 +89,7 @@ namespace MassSpectrometry
                     if (discriminationFactor > discriminationFactorToCutPeak &&
                         (indexOfValley + direction < timePoints.Count && indexOfValley + direction >= 0))
                     {
-                        IIndexedPeak secondValleyTimepoint = timePoints[indexOfValley + direction];
+                        T secondValleyTimepoint = timePoints[indexOfValley + direction];
 
                         discriminationFactor =
                             (timepoint.Intensity - secondValleyTimepoint.Intensity) / timepoint.Intensity;
@@ -112,7 +113,7 @@ namespace MassSpectrometry
         /// </summary>
         /// <param name="peakBoundaries"></param>
         /// <param name="separationValueAtPeakCenter"></param>
-        public static void RemovePeaks(List<IIndexedPeak> peaks, List<IIndexedPeak> peakBoundaries, double separationValueAtPeakCenter)
+        public static void RemovePeaks(List<T> peaks, List<T> peakBoundaries, double separationValueAtPeakCenter)
         {
             if (peakBoundaries.IsNotNullOrEmpty())
             {
@@ -145,7 +146,7 @@ namespace MassSpectrometry
         /// <summary>
         /// Find the peak boundaries of any IIndexedPeak list and remove the peaks that are outside of the boundaries.
         /// </summary>
-        public static void CutPeak(List<IIndexedPeak> peaks, double discriminationFactorToCutPeak = 0.6)
+        public static void CutPeak(List<T> peaks, double discriminationFactorToCutPeak = 0.6)
         {
             if (peaks == null || peaks.Count < 5) return;
             var apexPeak = peaks.MaxBy(p => p.Intensity);
@@ -162,6 +163,16 @@ namespace MassSpectrometry
             ApexScanIndex = Peaks.MaxBy(p => p.Intensity).ZeroBasedScanIndex;
             StartScanIndex = Peaks.Min(p => p.ZeroBasedScanIndex);
             EndScanIndex = Peaks.Max(p => p.ZeroBasedScanIndex);
+        }
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            return ((IEnumerable<T>)Peaks).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return ((IEnumerable)Peaks).GetEnumerator();
         }
     }
 }

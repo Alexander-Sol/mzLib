@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace MassSpectrometry
 {
-    public class MassIndexingEngine: IndexingEngine<IndexedMass>
+    public class MassIndexingEngine : IndexingEngine<IndexedMass>
     {
         protected override int BinsPerDalton => 1;
         public int MaxMass { get; set; } = 30000;
@@ -52,10 +52,10 @@ namespace MassSpectrometry
                 return true;
         }
 
-        public override List<ExtractedIonChromatogram> GetAllXics(Tolerance peakFindingTolerance, int maxMissedScanAllowed, double maxRTRange, int numPeakThreshold)
+        public override List<ExtractedIonChromatogram<IndexedMass>> GetAllXics(Tolerance peakFindingTolerance, int maxMissedScanAllowed, double maxRTRange, int numPeakThreshold)
         {
-            var xics = new List<ExtractedIonChromatogram>();
-            var matchedPeaks = new Dictionary<IIndexedPeak, ExtractedIonChromatogram>();
+            var xics = new List<ExtractedIonChromatogram<IndexedMass>>();
+            var matchedPeaks = new Dictionary<IndexedMass, ExtractedIonChromatogram<IndexedMass>>();
             var sortedPeaks = IndexedPeaks.Where(v => v != null).SelectMany(peaks => peaks).OrderBy(p => p.Intensity).ToList();
             foreach (var peak in sortedPeaks)
             {
@@ -64,7 +64,7 @@ namespace MassSpectrometry
                     var peakList = GetXic(peak.M, peak.RetentionTime, peakFindingTolerance, maxMissedScanAllowed, maxRTRange, peak.Charge, matchedPeaks);
                     if (peakList.Count >= numPeakThreshold)
                     {
-                        var newXIC = new ExtractedIonChromatogram(peakList);
+                        var newXIC = new ExtractedIonChromatogram<IndexedMass>(peakList);
                         foreach (var matchedPeak in peakList)
                         {
                             matchedPeaks.Add(matchedPeak, newXIC);

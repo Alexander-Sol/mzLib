@@ -61,7 +61,7 @@ namespace MassSpectrometry
         /// <param name="m"> the m/z of the peak to be searched for </param>
         /// <param name="zeroBasedScanIndex"> the zero based index of the scan where the peak is to be found </param>
         /// <param name="charge"> an optional parameter used only for IIndexedMass and massIndexingEngine; must be null for mz peak indexing </param>
-        public IIndexedPeak? GetIndexedPeak(double m, int zeroBasedScanIndex, Tolerance ppmTolerance, int? charge = null)
+        public T? GetIndexedPeak(double m, int zeroBasedScanIndex, Tolerance ppmTolerance, int? charge = null) 
         {
             if (IndexedPeaks == null) throw new MzLibException("Error: Attempt to retrieve indexed peak before peak indexing was performed");
             var bins = GetBinsInRange(m, ppmTolerance);
@@ -84,8 +84,8 @@ namespace MassSpectrometry
         /// <param name="charge"> an optional parameter used only for IIndexedMass and massIndexingEngine; must be null for mz peak indexing </param>
         /// <param name="matchedPeaks"> the dictionary that stores all the peaks already matched to an xic </param>
         /// <returns> A list of IIndexedPeak objects, ordered by retention time </returns>
-        public List<IIndexedPeak> GetXic(double m, double retentionTime, Tolerance ppmTolerance,
-            int missedScansAllowed, double maxPeakHalfWidth = double.MaxValue, int? charge = null, Dictionary<IIndexedPeak, ExtractedIonChromatogram> matchedPeaks = null)
+        public List<T> GetXic(double m, double retentionTime, Tolerance ppmTolerance,
+            int missedScansAllowed, double maxPeakHalfWidth = double.MaxValue, int? charge = null, Dictionary<T, ExtractedIonChromatogram<T>> matchedPeaks = null)
         {
             // get precursor scan to start at
             int scanIndex = -1;
@@ -120,11 +120,11 @@ namespace MassSpectrometry
         /// <param name="charge"> an optional parameter used only for IIndexedMass and massIndexingEngine; must be null for mz peak indexing </param>
         /// <param name="matchedPeaks"> the dictionary that stores all the peaks already matched to an xic </param>
         /// <returns> A list of IIndexedPeak objects, ordered by retention time </returns>
-        public List<IIndexedPeak> GetXic(double m, int zeroBasedStartIndex, Tolerance ppmTolerance, int missedScansAllowed, double maxPeakHalfWidth = double.MaxValue, int? charge = null, Dictionary<IIndexedPeak, ExtractedIonChromatogram> matchedPeaks = null)
+        public List<T> GetXic(double m, int zeroBasedStartIndex, Tolerance ppmTolerance, int missedScansAllowed, double maxPeakHalfWidth = double.MaxValue, int? charge = null, Dictionary<T, ExtractedIonChromatogram<T>> matchedPeaks = null)
         {
             if (IndexedPeaks == null || ScanInfoArray == null) throw new MzLibException("Error: Attempt to retrieve XIC before peak indexing was performed");
 
-            List<IIndexedPeak> xic = new List<IIndexedPeak>();
+            List<T> xic = new List<T>();
             var allBins = GetBinsInRange(m, ppmTolerance);
             if (allBins.Count == 0)
                 return xic;
@@ -194,19 +194,20 @@ namespace MassSpectrometry
         /// <summary>
         /// A generic method performing peak tracing for all the peaks in an indexingEngine and trying to find all XICs.
         /// <returns> A list of ExtractedIonChromatogram objects representing all XICs that can be found in an indexingEngine </returns>
-        public virtual List<ExtractedIonChromatogram> GetAllXics(Tolerance peakFindingTolerance, int maxMissedScanAllowed, double maxRTRange, int numPeakThreshold)
+        public virtual List<ExtractedIonChromatogram<T>> GetAllXics(Tolerance peakFindingTolerance, int maxMissedScanAllowed, double maxRTRange, int numPeakThreshold)
         {
-            var xics = new List<ExtractedIonChromatogram>();
-            var matchedPeaks = new Dictionary<IIndexedPeak, ExtractedIonChromatogram>();
+            var xics = new List<ExtractedIonChromatogram<T>>();
+            var matchedPeaks = new Dictionary<T, ExtractedIonChromatogram<T>>();
             var sortedPeaks = IndexedPeaks.Where(v => v != null).SelectMany(peaks => peaks).OrderBy(p => p.Intensity).ToList();
             foreach (var peak in sortedPeaks)
             {
                 if (!matchedPeaks.ContainsKey(peak))
                 {
-                    var peakList = GetXic(peak.M, peak.RetentionTime, peakFindingTolerance, maxMissedScanAllowed, maxRTRange, null, matchedPeaks);
+                    int? charge = peak is IndexedMass indexedMass ? indexedMass.Charge : null;
+                    var peakList = GetXic(peak.M, peak.RetentionTime, peakFindingTolerance, maxMissedScanAllowed, maxRTRange, charge, matchedPeaks);
                     if (peakList.Count >= numPeakThreshold)
                     {
-                        var newXIC = new ExtractedIonChromatogram(peakList);
+                        var newXIC = new ExtractedIonChromatogram<T>(peakList);
                         foreach(var matchedPeak in peakList)
                         {
                             matchedPeaks.Add(matchedPeak, newXIC);
@@ -244,6 +245,7 @@ namespace MassSpectrometry
         internal static T? GetBestPeakFromBins(List<List<T>> allBins, double mz, int zeroBasedScanIndex, IList<int> peakIndicesInBins, Tolerance ppmTolerance, int? charge = null)
         {
             T? bestPeak = default(T);
+            if (charge != null && typeof(T) != typeof(IndexedMass))
             for (int i = 0; i < allBins.Count; i++)
             {
                 var tempPeak = GetPeakFromBin(allBins[i], mz, zeroBasedScanIndex, peakIndicesInBins[i], ppmTolerance, charge);
