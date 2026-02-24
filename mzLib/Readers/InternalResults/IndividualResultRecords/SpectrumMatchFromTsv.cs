@@ -20,7 +20,7 @@ namespace Readers
         // Pre-compiled regex patterns for ReadFragmentIonsFromString
         private static readonly Regex MIonRegex = new Regex(@"^(M)(\d*)([\w\-]*)([+-]\d+):([\d\.]+)$", RegexOptions.Compiled);
         private static readonly Regex TerminalIonRegex = new Regex(@"^(.*?)([+-]\d+):([\d\.]+)$", RegexOptions.Compiled);
-        private static readonly Regex NumberExtractor = new Regex(@"-?\d+(\.\d+)?", RegexOptions.Compiled);
+        private static readonly Regex NumberExtractor = new Regex(@"-?\d+(?:\.\d+)?", RegexOptions.Compiled);
 
         public string FullSequence { get; protected set; }
         public int Ms2ScanNumber { get; protected set; }
@@ -332,10 +332,14 @@ namespace Readers
                 // Helper: Extract nth number (with sign) from a string
                 static double ExtractNumber(string input, int n)
                 {
-                    var matches = NumberExtractor.Matches(input);
-                    return matches.Count > n
-                        ? double.Parse(matches[n].Value, CultureInfo.InvariantCulture)
-                        : 1; // fallback default
+                    int matchIndex = 0;
+                    foreach (Match match in NumberExtractor.Matches(input))
+                    {
+                        if (matchIndex == n)
+                            return double.Parse(match.Value, CultureInfo.InvariantCulture);
+                        matchIndex++;
+                    }
+                    return 1; // fallback default
                 }
 
                 for (int index = 0; index < peakMzs.Count; index++)
