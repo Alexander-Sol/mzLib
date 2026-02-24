@@ -13,9 +13,14 @@ namespace Readers
 {
     public abstract class SpectrumMatchFromTsv : IQuantifiableRecord
     {
-        protected static readonly Regex PositionParser = new Regex(@"(\d+)\s+to\s+(\d+)");
-        protected static readonly Regex VariantParser = new Regex(@"[a-zA-Z]+(\d+)([a-zA-Z]+)");
-        protected static readonly Regex IonParser = new Regex(@"([a-zA-Z]+)(\d+)");
+        protected static readonly Regex PositionParser = new Regex(@"(\d+)\s+to\s+(\d+)", RegexOptions.Compiled);
+        protected static readonly Regex VariantParser = new Regex(@"[a-zA-Z]+(\d+)([a-zA-Z]+)", RegexOptions.Compiled);
+        protected static readonly Regex IonParser = new Regex(@"([a-zA-Z]+)(\d+)", RegexOptions.Compiled);
+
+        // Pre-compiled regex patterns for ReadFragmentIonsFromString
+        private static readonly Regex MIonRegex = new Regex(@"^(M)(\d*)([\w\-]*)([+-]\d+):([\d\.]+)$", RegexOptions.Compiled);
+        private static readonly Regex TerminalIonRegex = new Regex(@"^(.*?)([+-]\d+):([\d\.]+)$", RegexOptions.Compiled);
+        private static readonly Regex NumberExtractor = new Regex(@"-?\d+(\.\d+)?", RegexOptions.Compiled);
 
         public string FullSequence { get; protected set; }
         public int Ms2ScanNumber { get; protected set; }
@@ -64,6 +69,11 @@ namespace Readers
 
         public List<MatchedFragmentIon> VariantCrossingIons { get; protected set; }
 
+        /// <summary>
+        /// Cached split line from constructor, available for derived classes to avoid re-splitting.
+        /// </summary>
+        protected string[] SplitLine { get; set; }
+
         #region IQuantifiableRecord Properties and Methods
         public string FileName => FileNameWithoutExtension;
         public int OneBasedScanNumber => Ms2ScanNumber;
@@ -108,7 +118,13 @@ namespace Readers
         /// <param name="parsedHeader">index of each potential column in the header</param>
         protected SpectrumMatchFromTsv(string line, char[] split, Dictionary<string, int> parsedHeader)
         {
-            var spl = line.Split(split).Select(p => p.Trim('\"')).ToArray();
+            var spl = line.Split(split);
+            for (int i = 0; i < spl.Length; i++)
+            {
+                if (spl[i].Length > 0 && spl[i][0] == '"')
+                    spl[i] = spl[i].Trim('"');
+            }
+            SplitLine = spl;
 
             //Required properties
             FileNameWithoutExtension = spl[parsedHeader[SpectrumMatchFromTsvHeader.FileName]].Trim();
@@ -316,7 +332,7 @@ namespace Readers
                 // Helper: Extract nth number (with sign) from a string
                 static double ExtractNumber(string input, int n)
                 {
-                    var matches = Regex.Matches(input, @"-?\d+(\.\d+)?");
+                    var matches = NumberExtractor.Matches(input);
                     return matches.Count > n
                         ? double.Parse(matches[n].Value, CultureInfo.InvariantCulture)
                         : 1; // fallback default
@@ -328,7 +344,7 @@ namespace Readers
 
                     // Matches M, optional digits (to be stripped), optional custom loss, charge, m/z
                     // Examples matched: M15+1, M+1, M-P+1, M-P+1, M-A-P-H20-2, etc.
-                    var mIonMatch = Regex.Match(peak, @"^(M)(\d*)([\w\-]*)([+-]\d+):([\d\.]+)$");
+                    var mIonMatch = MIonRegex.Match(peak);
                     if (mIonMatch.Success)
                     {
                         // mIonMatch.Groups[1]: "M"
@@ -354,7 +370,7 @@ namespace Readers
                     //   (b5-97.98)+1:531.18657
                     //   aBaseLoss5-1:1234.489
                     //   (b5-97.98)-1:531.18657
-                    var match = Regex.Match(peak, @"^(.*?)([+-]\d+):([\d\.]+)$");
+                    var match = TerminalIonRegex.Match(peak);
                     if (!match.Success)
                         throw new FormatException($"Could not parse ion string: {peak}");
 

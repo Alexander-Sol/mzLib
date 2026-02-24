@@ -42,7 +42,7 @@ namespace Readers
         public PsmFromTsv(string line, char[] split, Dictionary<string, int> parsedHeader)
             : base (line, split, parsedHeader)
         {
-            var spl = line.Split(split).Select(p => p.Trim('\"')).ToArray();
+            var spl = SplitLine;
 
             //For crosslinks
             CrossType = (parsedHeader[SpectrumMatchFromTsvHeader.CrossTypeLabel] < 0) ? null : spl[parsedHeader[SpectrumMatchFromTsvHeader.CrossTypeLabel]].Trim();

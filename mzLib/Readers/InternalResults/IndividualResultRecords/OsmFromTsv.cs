@@ -13,7 +13,7 @@ namespace Readers
         public OsmFromTsv(string line, char[] split, Dictionary<string, int> parsedHeader)
             : base(line, split, parsedHeader)
         {
-            var spl = line.Split(split).Select(p => p.Trim('\"')).ToArray();
+            var spl = SplitLine;
 
             if (parsedHeader[SpectrumMatchFromTsvHeader.FivePrimeTerminus] >= 0)
                 FivePrimeTerminus = ChemicalFormula.ParseFormula(spl[parsedHeader[SpectrumMatchFromTsvHeader.FivePrimeTerminus]]);
