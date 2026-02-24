@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using MzLibUtil;
 
 namespace Readers
@@ -11,7 +12,9 @@ namespace Readers
         /// File size threshold (in bytes) above which the streaming producer-consumer path is used.
         /// Files below this size use the simpler ReadAllLines + Parallel.For approach.
         /// </summary>
-        private const long LargeFileThreshold = 50 * 1024 * 1024; // 50 MB
+        private const long LargeFileThreshold = 1 * 1024 * 1024; // 1 GB
+
+        private const int BytesPerLineEstimate = 1000; // Conservative estimate of average line length for pre-allocating arrays
 
         /// <summary>
         /// Reads a TSV file, choosing between a batch approach (small files) and a streaming
@@ -122,15 +125,33 @@ namespace Readers
         /// <summary>
         /// Streaming approach: one producer thread reads lines from disk while multiple consumer
         /// threads parse them in parallel. Overlaps I/O with CPU work and limits memory usage
-        /// via a bounded queue. Best for large files.
+        /// via a bounded channel. Uses a pre-allocated array indexed by line number to avoid
+        /// ConcurrentBag overhead and post-sort.
         /// </summary>
         private static List<T> ReadTsvStreaming<T>(string filePath, SupportedFileType type, out List<string> warnings) where T : SpectrumMatchFromTsv
         {
+            // Estimate line count from file size to pre-allocate the results array.
+            // Average TSV line is ~200-500 bytes; we use a conservative estimate (100 bytes)
+            // so the array is large enough. We'll trim at the end.
+            long fileSize;
+            try
+            {
+                fileSize = new FileInfo(filePath).Length;
+            }
+            catch (Exception e)
+            {
+                throw new MzLibException("Could not read file: " + e.Message, e);
+            }
+
+            int estimatedLines = (int)Math.Min(fileSize / BytesPerLineEstimate, int.MaxValue);
+
+            // Single file open: read header, then produce data lines from the same stream
+            StreamReader reader;
             string headerLine;
             try
             {
-                using var headerReader = new StreamReader(filePath);
-                headerLine = headerReader.ReadLine() ?? throw new MzLibException("File is empty: " + filePath);
+                reader = new StreamReader(filePath);
+                headerLine = reader.ReadLine() ?? throw new MzLibException("File is empty: " + filePath);
             }
             catch (MzLibException) { throw; }
             catch (Exception e)
@@ -142,69 +163,99 @@ namespace Readers
             bool fileIsGlyco = parsedHeader.ContainsKey(SpectrumMatchFromTsvHeader.GlycanMass) && parsedHeader[SpectrumMatchFromTsvHeader.GlycanMass] != -1;
 
             var warningsBag = new ConcurrentBag<string>();
-            var results = new ConcurrentBag<(int index, T value)>();
+
+            // Pre-allocate results array; will grow if estimate was too low
+            T?[] resultsArray = new T[estimatedLines];
+            object resizeLock = new object();
             int totalLineCount = 0;
 
-            var lineQueue = new BlockingCollection<(int lineNumber, string line)>(boundedCapacity: 4096);
+            var channel = Channel.CreateBounded<(int lineNumber, string line)>(
+                new BoundedChannelOptions(4096)
+                {
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait
+                });
 
-            // Producer: stream lines from file
-            var producerTask = Task.Run(() =>
+            // Producer: stream lines from the already-opened reader, using async WriteAsync
+            // to yield when the channel is full instead of spinning (avoids thread pool starvation)
+            var producerTask = Task.Run(async () =>
             {
+                int lineNum = 0;
                 try
                 {
-                    using var reader = new StreamReader(filePath);
-                    reader.ReadLine(); // skip header
-                    int lineNum = 1;
+                    var writer = channel.Writer;
                     string? line;
                     while ((line = reader.ReadLine()) != null)
                     {
-                        lineQueue.Add((lineNum, line));
+                        await writer.WriteAsync((lineNum, line));
                         lineNum++;
                     }
-                    Interlocked.Exchange(ref totalLineCount, lineNum - 1);
+                    Interlocked.Exchange(ref totalLineCount, lineNum);
                 }
                 finally
                 {
-                    lineQueue.CompleteAdding();
+                    channel.Writer.Complete();
+                    reader.Dispose();
                 }
             });
 
-            // Consumers: parse lines in parallel
+            // Consumers: parse lines and write directly into the pre-allocated array by index
             int maxConsumers = Math.Max(1, Math.Min(8, Environment.ProcessorCount - 1));
             var consumerTasks = new Task[maxConsumers];
             for (int c = 0; c < maxConsumers; c++)
             {
-                consumerTasks[c] = Task.Run(() =>
+                consumerTasks[c] = Task.Run(async () =>
                 {
-                    foreach (var (lineNumber, line) in lineQueue.GetConsumingEnumerable())
+                    var channelReader = channel.Reader;
+                    while (await channelReader.WaitToReadAsync())
                     {
-                        try
+                        while (channelReader.TryRead(out var item))
                         {
-                            T? result = ParseLine<T>(line, type, fileIsGlyco, parsedHeader);
-                            if (result != null)
-                                results.Add((lineNumber, result));
-                        }
-                        catch (Exception)
-                        {
-                            warningsBag.Add("Could not read line: " + (lineNumber + 1));
+                            var (lineNumber, line) = item;
+
+                            // Grow array if our estimate was too low (stable lock object)
+                            var arr = Volatile.Read(ref resultsArray);
+                            if (lineNumber >= arr.Length)
+                            {
+                                lock (resizeLock)
+                                {
+                                    arr = resultsArray;
+                                    if (lineNumber >= arr.Length)
+                                    {
+                                        int newSize = Math.Max(arr.Length * 2, lineNumber + 1);
+                                        var newArray = new T?[newSize];
+                                        Array.Copy(arr, newArray, arr.Length);
+                                        Volatile.Write(ref resultsArray, newArray);
+                                    }
+                                }
+                                arr = Volatile.Read(ref resultsArray);
+                            }
+
+                            try
+                            {
+                                arr[lineNumber] = ParseLine<T>(line, type, fileIsGlyco, parsedHeader);
+                            }
+                            catch (Exception)
+                            {
+                                warningsBag.Add("Could not read line: " + (lineNumber + 2)); // +2: 1-based + header
+                            }
                         }
                     }
                 });
             }
-
+            
             Task.WaitAll(producerTask);
             Task.WaitAll(consumerTasks);
 
-            // Sort by original line order to preserve deterministic output
-            var sortedResults = results.ToArray();
-            Array.Sort(sortedResults, (a, b) => a.index.CompareTo(b.index));
-            var psms = new List<T>(sortedResults.Length);
-            for (int i = 0; i < sortedResults.Length; i++)
+            // Collect non-null results in order (array is already indexed by line number)
+            int lineCount = totalLineCount;
+            var psms = new List<T>(lineCount);
+            for (int i = 0; i < lineCount; i++)
             {
-                psms.Add(sortedResults[i].value);
+                if (resultsArray[i] != null)
+                    psms.Add(resultsArray[i]!);
             }
 
-            int lineCount = totalLineCount;
             warnings = warningsBag.ToList();
 
             if (lineCount != psms.Count)
