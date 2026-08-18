@@ -16,6 +16,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- RetentionTimePredictorFactory.ChronologerTypeResolver is an internal seam so the
+         "mzLib.Chronologer not referenced" branch can be tested; the test assembly references
+         every project, so that branch is otherwise unreachable. -->
+    <InternalsVisibleTo Include="Test" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\MzLibUtil\MzLibUtil.csproj" />
     <ProjectReference Include="..\Omics\Omics.csproj" />
   </ItemGroup>

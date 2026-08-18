@@ -47,16 +47,40 @@ jobs:
           $version= &git describe --tags
           cd mzLib
           dotnet test --configuration Release /p:Platform="Any CPU" /p:Version=${version} --no-build
-      - name: Pack and Push NuGet Packages
-        # Two packages ship from this tag and must stay in lockstep: mzLib, and mzLib.Chronologer,
-        # which carries the TorchSharp/libtorch payload as an opt-in extra. mzLib.Chronologer pins an
-        # exact dependency on mzLib, so mzLib must be pushed first.
+      # Two packages ship from this tag and must stay in lockstep: mzLib, and mzLib.Chronologer,
+      # which carries the TorchSharp/libtorch payload as an opt-in extra. mzLib.Chronologer pins an
+      # EXACT dependency on mzLib, so mzLib must be pushed first and the Chronologer push must not
+      # run if it failed.
+      #
+      # These are four separate steps rather than one run: block on purpose. In a single block a
+      # step's exit code is the exit code of its LAST command, $ErrorActionPreference does not abort
+      # on a native executable's failure, and before the split the mzLib push happened to be last -
+      # so its failure failed the step. It no longer would. The failure mode that buys is permanent:
+      # the mzLib push fails, the Chronologer push succeeds, the job reports green, and nuget.org
+      # holds an mzLib.Chronologer pinned to [version] of an mzLib that was never published.
+      # NuGet.org versions are immutable, so that package can never be made restorable.
+      - name: Pack mzLib
         run: |
           $version= &git describe --tags
           cd mzLib
           nuget pack mzLib.nuspec -Version ${version} -Properties Configuration=Release
+      - name: Pack mzLib.Chronologer
+        run: |
+          $version= &git describe --tags
+          cd mzLib
           nuget pack mzLib.Chronologer.nuspec -Version ${version} -Properties "Configuration=Release;mzlibversion=${version}"
+      - name: Push mzLib
+        run: |
+          $version= &git describe --tags
+          cd mzLib
           dotnet nuget push mzLib.${version}.nupkg --source https://api.nuget.org/v3/index.json --api-key ${env:GITHUB_TOKEN}
+        env:
+          GITHUB_TOKEN: ${{ secrets.NUGET_KEY }}
+      # Reached only if the mzLib push above succeeded, which is the whole point of the split.
+      - name: Push mzLib.Chronologer
+        run: |
+          $version= &git describe --tags
+          cd mzLib
           dotnet nuget push mzLib.Chronologer.${version}.nupkg --source https://api.nuget.org/v3/index.json --api-key ${env:GITHUB_TOKEN}
         env:
           GITHUB_TOKEN: ${{ secrets.NUGET_KEY }}

@@ -1,4 +1,4 @@
-using Omics;
+using Omics.RetentionTimePrediction;
 
 // This file intentionally declares a namespace that does not match its assembly. It preserves the
 // pre-Chromatography type locations for downstream consumers (notably MetaMorpheus) that still
@@ -20,15 +20,25 @@ namespace Proteomics.RetentionTimePrediction;
 public static class ChromatographyExtensions
 {
     /// <summary>
-    /// Scores a biopolymer's base sequence with SSRCalc3.
+    /// Scores a peptide's base sequence with SSRCalc3.
     /// </summary>
     /// <remarks>
     /// The parameter was widened from <c>PeptideWithSetModifications</c> to
-    /// <see cref="IBioPolymerWithSetMods"/> so this shim depends only on Omics. Existing call sites
-    /// that pass a <c>PeptideWithSetModifications</c> continue to compile unchanged.
+    /// <see cref="IRetentionPredictable"/> so this shim depends only on Omics. Existing call sites
+    /// that pass a <c>PeptideWithSetModifications</c> continue to compile unchanged, because that
+    /// type implements the interface.
+    /// <para>
+    /// Deliberately <see cref="IRetentionPredictable"/> rather than <c>IBioPolymerWithSetMods</c>.
+    /// SSRCalc3 is a Krokhin reversed-phase model over the 20 proteinogenic residues, and
+    /// <c>OligoWithSetMods</c> satisfies <c>IBioPolymerWithSetMods</c> — so the wider signature
+    /// would accept an RNA oligo and, because A, C, G and U are also valid amino-acid one-letter
+    /// codes, return a plausible-looking number instead of throwing. Nucleic acids deliberately do
+    /// not implement <see cref="IRetentionPredictable"/>, so this signature excludes them
+    /// structurally rather than by convention.
+    /// </para>
     /// </remarks>
     public static double ScoreSequence(this Chromatography.RetentionTimePrediction.SSRCalc.SSRCalc3 predictor,
-        IBioPolymerWithSetMods peptide) => predictor.ScoreSequence(peptide.BaseSequence);
+        IRetentionPredictable peptide) => predictor.ScoreSequence(peptide.BaseSequence);
 }
 
 /// <inheritdoc cref="ChromatographyExtensions"/>

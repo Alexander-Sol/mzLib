@@ -20,17 +20,19 @@ namespace Chromatography.RetentionTimePrediction;
 /// </para>
 /// <para>
 /// <b>Construction is deliberately not part of this interface.</b> Use
-/// <c>RetentionTimePredictorFactory.Create</c> with a <c>PredictorType</c> value to build
-/// concrete predictors. This keeps the abstraction free of references to concrete types —
-/// most importantly the TorchSharp-backed <c>ChronologerRetentionTimePredictor</c>, which
-/// would otherwise force every consumer of this interface to transitively depend on
+/// <see cref="RetentionTimePredictorFactory.Create"/> with a <see cref="PredictorType"/> value
+/// to build concrete predictors. This keeps the abstraction free of references to concrete
+/// types — most importantly the TorchSharp-backed <c>ChronologerRetentionTimePredictor</c>,
+/// which would otherwise force every consumer of this interface to transitively depend on
 /// TorchSharp and ship its large native binaries.
 /// </para>
 /// <para>
-/// <b>Assembly layout:</b> the factory, the <c>PredictorType</c> enum and the Chronologer
-/// predictor all live in the separate <c>Chromatography.Chronologer</c> assembly, which is
-/// why they are referenced here as plain code spans rather than <c>see cref</c> links. This
-/// assembly deliberately does not reference that one; the dependency runs the other way.
+/// <b>Assembly layout:</b> this interface, the factory and the <see cref="PredictorType"/> enum
+/// all live here in <c>Chromatography</c>, alongside the two analytical predictors, so the
+/// lightweight predictors stay constructible from <c>mzLib</c> alone. Only the Chronologer
+/// predictor lives in the separate <c>Chromatography.Chronologer</c> assembly — referenced here
+/// as a plain code span rather than a <c>see cref</c> link, because this assembly deliberately
+/// does not reference that one; the dependency runs the other way.
 /// </para>
 /// </remarks>
 public interface IRetentionTimePredictor : IDisposable

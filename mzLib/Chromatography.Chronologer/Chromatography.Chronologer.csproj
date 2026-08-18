@@ -32,7 +32,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="libtorch-cpu-win-x64" Version="2.5.1" />
+    <!--
+      The all-RID libtorch-cpu metapackage rather than libtorch-cpu-win-x64. It restores
+      ~1,117 MB against ~318 MB for the win-x64 RID package alone, but narrowing it would drop
+      libtorch-cpu-osx-arm64 and libtorch-cpu-linux-x64 from the graph, and Chronologer is
+      MetaMorpheus's DEFAULT retention time predictor (CommonParameters.cs) - so on the Apple
+      Silicon build that mzLib #1127 and MetaMorpheus #2701 enable, every FDR analysis would hit
+      a DllNotFoundException on first use. That is not parallel to the Windows-only Thermo and
+      Bruker natives, which gate a file format rather than the default scoring path.
+      The size is now paid only by consumers who opt into this package, which was the point of
+      splitting it out; it is no longer charged to everyone who references mzLib.
+    -->
+    <PackageReference Include="libtorch-cpu" Version="2.5.1" />
     <PackageReference Include="TorchSharp" Version="0.105.1" />
   </ItemGroup>
 

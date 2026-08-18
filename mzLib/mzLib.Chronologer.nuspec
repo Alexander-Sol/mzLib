@@ -25,17 +25,20 @@
       <group targetFramework="net10.0">
         <dependency id="mzLib" version="[$mzlibversion$]" />
         <dependency id="TorchSharp" version="0.105.1" />
-        <dependency id="libtorch-cpu-win-x64" version="2.5.1" />
+        <dependency id="libtorch-cpu" version="2.5.1" />
       </group>
       <group targetFramework="net10.0-windows7.0">
         <dependency id="mzLib" version="[$mzlibversion$]" />
         <dependency id="TorchSharp" version="0.105.1" />
-        <dependency id="libtorch-cpu-win-x64" version="2.5.1" />
+        <dependency id="libtorch-cpu" version="2.5.1" />
       </group>
     </dependencies>
   </metadata>
   <files>
     <file src="mzLib.png" target="images\" />
+    <!-- Apache-2.0 attribution for the embedded Chronologer model weights, which ship in
+         this package rather than in mzLib now that the assembly has moved. -->
+    <file src="..\THIRD-PARTY-NOTICES.md" target="" />
     <file src="Chromatography.Chronologer\bin\Release\net10.0\Chromatography.Chronologer.dll" target="lib\net10.0" />
     <file src="Chromatography.Chronologer\bin\Release\net10.0\Chromatography.Chronologer.dll" target="lib\net10.0-windows7.0" />
   </files>

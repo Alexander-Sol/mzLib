@@ -10,6 +10,21 @@ namespace Omics.RetentionTimePrediction;
 /// here lets biopolymer projects describe themselves as retention-predictable without
 /// referencing Chromatography — which in turn keeps the deep-learning predictors and their
 /// native runtime out of the dependency graph of every project that merely handles peptides.
+/// <para>
+/// <b>Migration:</b> this interface was declared as
+/// <c>Chromatography.RetentionTimePrediction.IRetentionPredictable</c> from its introduction in
+/// December 2025 until the Chronologer split, so the move is a deliberate source break for
+/// external implementers — the one relocation in that change that did not preserve its namespace.
+/// Replace <c>using Chromatography.RetentionTimePrediction;</c> with
+/// <c>using Omics.RetentionTimePrediction;</c> where this type is named.
+/// </para>
+/// <para>
+/// No <c>[Obsolete]</c> shim is provided in the old namespace, and deliberately so: an empty
+/// derived interface of the same name would sit in the namespace that <c>Chromatography</c>'s own
+/// predictors declare, so every consumer holding both usings — <c>PredictionClients</c> among them
+/// — would get CS0104 ambiguity instead of the CS0246 it was meant to prevent. The shim would
+/// break the callers it was written to protect.
+/// </para>
 /// </remarks>
 public interface IRetentionPredictable
 {
