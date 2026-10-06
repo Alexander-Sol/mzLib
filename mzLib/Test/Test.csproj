@@ -23,6 +23,8 @@
     <PackageReference Include="NUnit" Version="4.1.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="Plotly.NET" Version="5.0.0" />
+    <PackageReference Include="Plotly.NET.CSharp" Version="0.12.0" />
     <PackageReference Include="SharpLearning.Optimization" Version="0.28.0" />
     <PackageReference Include="TopDownProteomics" Version="0.0.299" />
 	<AssemblyAttribute Include="System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute" />
@@ -48,6 +50,19 @@
     <ProjectReference Include="..\Quantification\Quantification.csproj" />
     <ProjectReference Include="..\SampleEvidenceModel\SampleEvidenceModel.csproj" />
     <ProjectReference Include="..\StatisticalModels\StatisticalModels.csproj" />
+    <ProjectReference Include="..\TopDownSimulator\TopDownSimulator.csproj" />
+  </ItemGroup>
+
+  <!-- Assembly references do not flow transitively through Readers' ProjectReference. Needed by
+       NoiseCharacterization, which reads the Thermo centroid stream's Noises/Baselines/Resolutions
+       columns directly because ThermoRawFileReader discards them. -->
+  <ItemGroup>
+    <Reference Include="ThermoFisher.CommonCore.Data">
+      <HintPath>..\Readers\Thermo\ThermoFisher.CommonCore.Data.dll</HintPath>
+    </Reference>
+    <Reference Include="ThermoFisher.CommonCore.RawFileReader">
+      <HintPath>..\Readers\Thermo\ThermoFisher.CommonCore.RawFileReader.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
