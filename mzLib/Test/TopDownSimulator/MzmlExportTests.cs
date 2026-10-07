@@ -97,8 +97,8 @@ public class MzmlExportTests
         var profile = new Simulator().Simulate(new[] { model }, MinCharge, MaxCharge, SigmaMz, scanTimes);
         var centroid = new Simulator().SimulateCentroided(new[] { model }, MinCharge, MaxCharge, SigmaMz, scanTimes);
 
-        int profilePoints = profile.Grid.MzGrid.Length;
-        int centroidPoints = centroid.Grid.MzGrid.Length;
+        int profilePoints = profile.Grid!.MzGrid.Length;
+        int centroidPoints = centroid.Scans.Max(s => s.MassSpectrum.XArray.Length);
 
         Assert.That(centroidPoints, Is.GreaterThan(0));
         Assert.That(centroidPoints, Is.LessThan(profilePoints / 10),

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -27,7 +27,7 @@ namespace Test.TopDownSimulator;
 /// <para>
 /// Re-simulating a few scans takes seconds rather than the minutes a full export needs, because
 /// the models are read back from a ground-truth sidecar instead of being refitted. That isolates
-/// everything downstream of fitting â€” the noise floor, jitter, the detection floor and merging â€”
+/// everything downstream of fitting — the noise floor, jitter, the detection floor and merging —
 /// which is where the noise model lives. Changes to fitting itself need a fresh export and a new
 /// sidecar.
 /// </para>
@@ -103,71 +103,6 @@ public class ScanRealismComparison
             t => new NoiseFloorModel(NoiseTimesInjectionTime / t.InjectionTimeMs)));
         yield return new Variant("noise-it+dedup", ctx => PerScan(ctx with { Models = DeduplicateByMass(ctx.Models) },
             t => new NoiseFloorModel(NoiseTimesInjectionTime / t.InjectionTimeMs)));
-
-        yield return new Variant("picked-signal", ctx => PeakPicked(ctx,
-            t => new NoiseFloorModel(ExportNoiseLevel, densityScale: 0)));
-        yield return new Variant("picked+noise-it", ctx => PeakPicked(ctx,
-            t => new NoiseFloorModel(NoiseTimesInjectionTime / t.InjectionTimeMs)));
-        yield return new Variant("picked+it+dedup", ctx => PeakPicked(ctx with { Models = DeduplicateByMass(ctx.Models) },
-            t => new NoiseFloorModel(NoiseTimesInjectionTime / t.InjectionTimeMs)));
-    }
-
-    /// <summary>
-    /// Centroids the way an instrument does: renders the summed profile on a dense grid and reports
-    /// one peak per local maximum, at its height. The library's centroid path instead samples the
-    /// summed profile at every model's isotopologue positions, so in a crowded region one real peak
-    /// comes out as a cluster of samples, its shoulders included.
-    /// </summary>
-    private static MsDataScan[] PeakPicked(SimulationContext ctx, Func<RealScan, NoiseFloorModel> noiseFor)
-    {
-        var rasterizer = new GridRasterizer();
-        return ctx.Targets.Select(t =>
-        {
-            var grid = rasterizer.Rasterize(ctx.Models, ctx.MinCharge, ctx.MaxCharge, ctx.WidthModel,
-                new[] { t.RetentionTime }, pointsPerSigma: 4);
-            var (mz, intensity) = LocalMaxima(grid.MzGrid, grid.Intensities);
-
-            var scan = new MsDataScan(new MzSpectrum(mz, intensity, false), 1, 1, true, Polarity.Positive,
-                t.RetentionTime, new MzLibUtil.MzRange(mz.Length > 0 ? mz[0] : 0, mz.Length > 0 ? mz[^1] : 1),
-                "synthetic", MZAnalyzerType.Orbitrap, intensity.Sum(), 1.0, null, "scan=1");
-
-            var noise = noiseFor(t);
-            var floor = new NoiseRelativeFloor(noise);
-            var reduced = SimulatedScanReducer.Reduce(new[] { scan }, new ScanReductionOptions { Floor = floor });
-            return new NoiseInjector(noise, ctx.WidthModel, t.Ms1Ordinal, jitter: PeakJitterModel.Orbitrap, floor: floor)
-                .Apply(reduced).Scans[0];
-        }).ToArray();
-    }
-
-    /// <summary>
-    /// Local maxima of one profile row, refined by a parabola through the logs of the three samples
-    /// around each maximum. That fit is exact for an isolated Gaussian.
-    /// </summary>
-    private static (double[] Mz, double[] Intensity) LocalMaxima(double[] grid, double[,] intensities)
-    {
-        var mz = new List<double>();
-        var height = new List<double>();
-        for (int b = 1; b < grid.Length - 1; b++)
-        {
-            double a = intensities[0, b - 1], c = intensities[0, b], d = intensities[0, b + 1];
-            if (!(c > a && c >= d && c > 0)) continue;
-
-            if (a > 0 && d > 0)
-            {
-                double la = Math.Log(a), lc = Math.Log(c), ld = Math.Log(d);
-                double curvature = la - 2 * lc + ld;
-                double p = curvature < 0 ? 0.5 * (la - ld) / curvature : 0;
-                mz.Add(grid[b] + p * 0.5 * (grid[b + 1] - grid[b - 1]));
-                height.Add(Math.Exp(lc - 0.25 * (la - ld) * p));
-            }
-            else
-            {
-                mz.Add(grid[b]);
-                height.Add(c);
-            }
-        }
-
-        return (mz.ToArray(), height.ToArray());
     }
 
     /// <summary>
@@ -228,7 +163,7 @@ public class ScanRealismComparison
 
         Console.WriteLine();
         Console.WriteLine($"{"scan",5} {"region",13} {"variant",-16} {"real n",7} {"sim n",7} {"n ratio",7} " +
-                          $"{"r match",7} {"s match",7} {"cos",6} {"âˆšcos",6} {"TIC",8} {"KS",5} {"r<1%",5} {"s<1%",5}");
+                          $"{"r match",7} {"s match",7} {"cos",6} {"sqrtcos",7} {"TIC",8} {"KS",5} {"r<1%",5} {"s<1%",5}");
 
         for (int t = 0; t < real.Length; t++)
         {

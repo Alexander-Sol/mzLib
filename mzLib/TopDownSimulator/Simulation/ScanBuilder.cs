@@ -53,6 +53,52 @@ public sealed class ScanBuilder
         return scans;
     }
 
+    /// <summary>
+    /// Builds centroided MS1 scans from per-scan peak lists, each already in ascending m/z. Every
+    /// scan carries the same scan window, the span of peaks over the whole run.
+    /// </summary>
+    public MsDataScan[] BuildCentroidedMs1Scans(
+        double[] scanTimes,
+        (double[] Mz, double[] Intensity)[] spectra,
+        Polarity polarity = Polarity.Positive,
+        MZAnalyzerType analyzer = MZAnalyzerType.Orbitrap,
+        string scanFilter = "synthetic")
+    {
+        if (scanTimes.Length != spectra.Length)
+            throw new ArgumentException("There must be one spectrum per scan time.", nameof(spectra));
+
+        double min = double.PositiveInfinity, max = double.NegativeInfinity;
+        foreach (var (mz, _) in spectra)
+        {
+            if (mz.Length == 0) continue;
+            min = Math.Min(min, mz[0]);
+            max = Math.Max(max, mz[^1]);
+        }
+
+        var mzRange = double.IsFinite(min) ? new MzRange(min, max) : new MzRange(0, 0);
+        var scans = new MsDataScan[scanTimes.Length];
+        for (int s = 0; s < scans.Length; s++)
+        {
+            var (mz, intensities) = spectra[s];
+            scans[s] = new MsDataScan(
+                massSpectrum: new MzSpectrum(mz, intensities, false),
+                oneBasedScanNumber: s + 1,
+                msnOrder: 1,
+                isCentroid: true,
+                polarity: polarity,
+                retentionTime: scanTimes[s],
+                scanWindowRange: mzRange,
+                scanFilter: scanFilter,
+                mzAnalyzer: analyzer,
+                totalIonCurrent: intensities.Sum(),
+                injectionTime: 1.0,
+                noiseData: null,
+                nativeId: $"scan={s + 1}");
+        }
+
+        return scans;
+    }
+
     public GenericMsDataFile BuildMsDataFile(MsDataScan[] scans, SourceFile? sourceFile = null)
     {
         sourceFile ??= new SourceFile(

@@ -52,12 +52,14 @@ public static class FeatureGroundTruth
     /// A charge state that reduction removed entirely is absent, so a benchmark does not start with
     /// unfixable false negatives.
     /// <para>
-    /// m/z values are snapped to <paramref name="mzAxis"/> — the axis the scans were written on —
-    /// so the truth quotes the positions that are actually in the file rather than theoretical
-    /// centroids that may have been merged when the axis was built.
+    /// The apex m/z is snapped to the nearest signal centroid in the apex scan, so the truth quotes
+    /// a position that is actually in the file. Where an envelope's isotopologues are not resolved
+    /// from each other or from a neighbour's, that is the merged maximum the instrument would
+    /// report, not the theoretical isotopologue position.
     /// </para>
     /// </remarks>
     /// <param name="oneBasedScanNumbers">Scan numbers parallel to <paramref name="scanTimes"/>.</param>
+    /// <param name="scanMzs">Per scan, the ascending m/z of the signal centroids written to it.</param>
     public static SimulatedFeature[] Build(
         IReadOnlyList<ProteoformModel> proteoforms,
         int minCharge,
@@ -65,7 +67,7 @@ public static class FeatureGroundTruth
         IPeakWidthModel widthModel,
         double[] scanTimes,
         int[] oneBasedScanNumbers,
-        double[] mzAxis,
+        IReadOnlyList<double[]> scanMzs,
         IIntensityFloor intensityFloor)
     {
         if (intensityFloor is null) throw new ArgumentNullException(nameof(intensityFloor));
@@ -73,9 +75,11 @@ public static class FeatureGroundTruth
         if (widthModel is null) throw new ArgumentNullException(nameof(widthModel));
         if (scanTimes is null) throw new ArgumentNullException(nameof(scanTimes));
         if (oneBasedScanNumbers is null) throw new ArgumentNullException(nameof(oneBasedScanNumbers));
-        if (mzAxis is null) throw new ArgumentNullException(nameof(mzAxis));
+        if (scanMzs is null) throw new ArgumentNullException(nameof(scanMzs));
         if (oneBasedScanNumbers.Length != scanTimes.Length)
             throw new ArgumentException("Scan numbers must be parallel to scan times.", nameof(oneBasedScanNumbers));
+        if (scanMzs.Count != scanTimes.Length)
+            throw new ArgumentException("There must be one peak list per scan.", nameof(scanMzs));
         if (minCharge < 1 || maxCharge < minCharge)
             throw new ArgumentException("Charge range must satisfy 1 ≤ minCharge ≤ maxCharge.");
 
@@ -195,7 +199,7 @@ public static class FeatureGroundTruth
                     // identifier a finder's reported monoisotopic m/z is scored against, so it must
                     // be exact whether or not that peak survived into the envelope.
                     MonoisotopicMz: model.MonoisotopicMass.ToMz(z),
-                    ApexMz: SnapToAxis(mzAxis, apexPeakMz),
+                    ApexMz: SnapToAxis(scanMzs[apexScan], apexPeakMz),
                     ApexRt: scanTimes[apexScan],
                     RtStart: scanTimes[firstScan],
                     RtEnd: scanTimes[lastScan],

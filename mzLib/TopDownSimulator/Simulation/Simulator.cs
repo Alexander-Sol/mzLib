@@ -11,7 +11,11 @@ using TopDownSimulator.Noise;
 
 namespace TopDownSimulator.Simulation;
 
-public sealed record SimulationResult(RasterizedScanGrid Grid, MsDataScan[] Scans, GenericMsDataFile DataFile);
+/// <param name="Grid">
+/// The profile grid the scans were rendered on, or null for a centroided simulation, where every
+/// scan has its own peak list rather than samples of one shared axis.
+/// </param>
+public sealed record SimulationResult(RasterizedScanGrid? Grid, MsDataScan[] Scans, GenericMsDataFile DataFile);
 
 /// <summary>
 /// Outcome of writing a simulation to disk. <see cref="PeakCount"/> is counted after reduction,
@@ -47,9 +51,15 @@ public sealed record PrecursorShiftSummary(
 /// A simulated MS1 run after reduction and noise injection but before it is written, which is the
 /// point at which MSn scans can still be interleaved into it.
 /// </summary>
+/// <param name="ScanTimes">Retention time of each MS1 scan.</param>
+/// <param name="SignalMz">
+/// Per scan, the m/z of every signal centroid that survived reduction, before jitter and noise.
+/// The feature truth quotes positions from these, so it names peaks that are really in the file.
+/// </param>
 public sealed record PreparedSimulation(
     MsDataScan[] Ms1Scans,
-    RasterizedScanGrid Grid,
+    double[] ScanTimes,
+    double[][] SignalMz,
     IIntensityFloor Floor,
     NoiseInjectionSummary? Noise);
 
@@ -95,8 +105,8 @@ public sealed class Simulator
         Simulate(proteoforms, minCharge, maxCharge, new ConstantPeakWidth(sigmaMz), scanTimes, isCentroid, pointsPerSigma, mzPaddingInSigmas);
 
     /// <summary>
-    /// Simulates centroid spectra by evaluating the forward model at the theoretical isotopologue
-    /// m/z of every charge state, with no intervening profile grid.
+    /// Simulates centroid spectra: one centroid per local maximum of the summed profile, at that
+    /// maximum's height, which is what an instrument reports. See <see cref="ProfileCentroider"/>.
     /// </summary>
     public SimulationResult SimulateCentroided(
         IReadOnlyList<ProteoformModel> proteoforms,
@@ -105,10 +115,10 @@ public sealed class Simulator
         IPeakWidthModel widthModel,
         double[] scanTimes)
     {
-        var grid = _rasterizer.RasterizeAtCentroids(proteoforms, minCharge, maxCharge, widthModel, scanTimes);
-        var scans = _scanBuilder.BuildMs1Scans(grid, isCentroid: true);
+        var spectra = new ProfileCentroider(proteoforms, minCharge, maxCharge, widthModel).Centroid(scanTimes);
+        var scans = _scanBuilder.BuildCentroidedMs1Scans(scanTimes, spectra);
         var file = _scanBuilder.BuildMsDataFile(scans);
-        return new SimulationResult(grid, scans, file);
+        return new SimulationResult(null, scans, file);
     }
 
     public SimulationResult SimulateCentroided(
@@ -302,6 +312,9 @@ public sealed class Simulator
 
         var floor = SimulatedScanReducer.ComputeFloor(simulation.Scans, reduction);
         var scans = SimulatedScanReducer.Reduce(simulation.Scans, reduction);
+        var signalMz = new double[scans.Length][];
+        for (int s = 0; s < scans.Length; s++)
+            signalMz[s] = scans[s].MassSpectrum.XArray;
 
         NoiseInjectionSummary? noiseSummary = null;
         if (noise is not null)
@@ -313,7 +326,7 @@ public sealed class Simulator
             (scans, noiseSummary) = injector.Apply(scans);
         }
 
-        return new PreparedSimulation(scans, simulation.Grid, floor, noiseSummary);
+        return new PreparedSimulation(scans, (double[])scanTimes.Clone(), signalMz, floor, noiseSummary);
     }
 
     /// <summary>
@@ -350,7 +363,7 @@ public sealed class Simulator
 
             var features = FeatureGroundTruth.Build(
                 proteoforms, minCharge, maxCharge, widthModel,
-                prepared.Grid.ScanTimes, ms1ScanNumbers, prepared.Grid.MzGrid, prepared.Floor);
+                prepared.ScanTimes, ms1ScanNumbers, prepared.SignalMz, prepared.Floor);
 
             featurePath = Path.ChangeExtension(outputPath, ".features.tsv");
             FeatureGroundTruth.Write(features, featurePath);
