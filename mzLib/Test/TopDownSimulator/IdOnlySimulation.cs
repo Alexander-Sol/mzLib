@@ -228,6 +228,102 @@ public class IdOnlySimulation
                                   $"{c.SimulatedMatchedFraction,7:F2} {c.Cosine,6:F3} {c.SqrtCosine,7:F3} {c.TicRatio,7:F2} {c.RelativeIntensityKs,5:F2}");
             }
         }
+
+        CompareSignalPeaks(real, simulations);
+        CompareSpeciesEnvelopes(real, simulations);
+    }
+
+    /// <summary>
+    /// Per scan, only the peaks at S/N ≥ 10 over m/z 600–2000, at the target times and summarised over
+    /// every 10th scan from 30 to 50 min. The noise level is the real scan's, from its injection time
+    /// (<see cref="ScanNoiseConditions"/>), and the simulated scan is cut at the same threshold.
+    /// </summary>
+    private static void CompareSignalPeaks(MsDataScan[] real, List<(string Label, MsDataScan[] Scans)> simulations)
+    {
+        var noiseByScan = ScanNoiseConditions.FromSourceScans(real, new NoiseFloorModel(663.0), conditionDensity: false)
+            .Select((m, i) => (real[i], m))
+            .ToDictionary(p => p.Item1, p => p.m);
+
+        CentroidSpectrumComparison Compare(MsDataScan r, MsDataScan s)
+        {
+            var noise = noiseByScan[r];
+            var (rMz, rI) = SignalPeaks.Select(r.MassSpectrum.XArray, r.MassSpectrum.YArray, noise, 10, 600, 2000);
+            var (sMz, sI) = SignalPeaks.Select(s.MassSpectrum.XArray, s.MassSpectrum.YArray, noise, 10, 600, 2000);
+            return CentroidSpectrumComparison.Compare(rMz, rI, sMz, sI);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Per scan, peaks at S/N >= 10 only (m/z 600-2000):");
+        Console.WriteLine($"  {"RT",5} {"regime",-15} {"simulation",-28} {"real n",7} {"sim n",7} {"r match",7} {"s match",7} {"cos",6} {"sqrtcos",7} {"TIC",6}");
+        foreach (var (rt, regime) in TargetTimes)
+        {
+            var r = Nearest(real, rt);
+            foreach (var (label, scans) in simulations)
+            {
+                var c = Compare(r, Nearest(scans, rt));
+                Console.WriteLine($"  {r.RetentionTime,5:F1} {regime,-15} {label,-28} {c.RealPeaks,7} {c.SimulatedPeaks,7} " +
+                                  $"{c.RealMatchedFraction,7:F2} {c.SimulatedMatchedFraction,7:F2} {c.Cosine,6:F3} {c.SqrtCosine,7:F3} {c.TicRatio,6:F2}");
+            }
+        }
+
+        var sample = real.Where(r => r.RetentionTime is >= 30 and <= 50).Where((_, i) => i % 10 == 0).ToArray();
+        Console.WriteLine($"  Medians over {sample.Length} scans, 30-50 min:");
+        Console.WriteLine($"  {"simulation",-28} {"count ratio",11} {"r match",7} {"s match",7} {"cos",6} {"sqrtcos",7} {"TIC",6}");
+        foreach (var (label, scans) in simulations)
+        {
+            var cs = sample.Select(r => Compare(r, Nearest(scans, r.RetentionTime))).ToArray();
+            Console.WriteLine($"  {label,-28} {Median(cs.Select(c => c.PeakCountRatio)),11:F2} {Median(cs.Select(c => c.RealMatchedFraction)),7:F2} " +
+                              $"{Median(cs.Select(c => c.SimulatedMatchedFraction)),7:F2} {Median(cs.Select(c => c.Cosine)),6:F3} " +
+                              $"{Median(cs.Select(c => c.SqrtCosine)),7:F3} {Median(cs.Select(c => c.TicRatio)),6:F2}");
+        }
+    }
+
+    /// <summary>
+    /// Per species, the real and simulated envelopes around the apex rep1's own fit places it at:
+    /// isotopologue intensities per charge, summed over apex ± 0.1 min, over every charge at which the
+    /// species lands inside the scan window. Judges the signal model species by species, where the
+    /// whole-scan metrics only see the tallest peaks and the noise.
+    /// </summary>
+    private static void CompareSpeciesEnvelopes(MsDataScan[] real, List<(string Label, MsDataScan[] Scans)> simulations)
+    {
+        const double halfWidth = 0.1;
+        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var anchors = species.Select(s => s.Anchor.Identifier).ToHashSet();
+        var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));
+        var realExtractor = new GroundTruthExtractor(real, ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
+        var targets = fitted
+            .Where(f => f.Abundance > 0 && f.Identifier is not null && anchors.Contains(f.Identifier))
+            .Select(f => (f.MonoisotopicMass, Apex: f.RtProfile.Mu, Charges: realExtractor.ObservableCharges(f.MonoisotopicMass)))
+            .ToArray();
+        var realTruths = targets.AsParallel().AsOrdered()
+            .Select(t => realExtractor.Extract(t.MonoisotopicMass, t.Apex, halfWidth, t.Charges.Min, t.Charges.Max))
+            .ToArray();
+
+        Console.WriteLine();
+        Console.WriteLine($"Per species ({targets.Length}), envelope summed over the fitted apex ± {halfWidth} min, charges inside the scan window:");
+        Console.WriteLine($"  {"simulation",-28} {"n",4} {"median cos",10} {"p25 cos",8} {"charge cos",10} {"apex within 1",13} {"log10 ratio p25/p50/p75",24} {"mean |log10 ratio|",18}");
+        foreach (var (label, scans) in simulations)
+        {
+            var extractor = new GroundTruthExtractor(scans, ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
+            var results = targets.AsParallel().AsOrdered()
+                .Select((t, i) => SpeciesEnvelopeComparison.Compare(realTruths[i],
+                    extractor.Extract(t.MonoisotopicMass, t.Apex, halfWidth, t.Charges.Min, t.Charges.Max)))
+                .Where(c => c is not null)
+                .Select(c => c!)
+                .ToArray();
+            var cos = results.Select(c => c.Cosine).OrderBy(x => x).ToArray();
+            var ratio = results.Select(c => Math.Log10(c.IntensityRatio)).OrderBy(x => x).ToArray();
+            Console.WriteLine($"  {label,-28} {results.Length,4} {cos[cos.Length / 2],10:F3} {cos[cos.Length / 4],8:F3} " +
+                              $"{Median(results.Select(c => c.ChargeProfileCosine)),10:F3} " +
+                              $"{results.Count(c => Math.Abs(c.RealApexCharge - c.SimulatedApexCharge) <= 1) / (double)results.Length,13:P0} " +
+                              $"{$"{ratio[ratio.Length / 4]:F2} / {ratio[ratio.Length / 2]:F2} / {ratio[3 * ratio.Length / 4]:F2}",24} {ratio.Average(Math.Abs),18:F3}");
+        }
+    }
+
+    private static double Median(IEnumerable<double> values)
+    {
+        var v = values.Where(double.IsFinite).OrderBy(x => x).ToArray();
+        return v.Length == 0 ? double.NaN : v[v.Length / 2];
     }
 
     /// <summary>

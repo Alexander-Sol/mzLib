@@ -216,11 +216,52 @@ regression with slope below one compresses the top of the range, and the `.v2` a
 inflated by the same window artefact as the charge. The 35.1 and 53.8 min scans are unchanged
 (noise-dominated).
 
+## Signal-focused comparison
+
+`CompareHeldOut` now ends with two comparisons that look past the noise. They use
+`TopDownSimulator/Comparison/SpeciesEnvelopeComparison.cs` and `SignalPeaks.cs`.
+
+**Per species.** For each of rep1's 450 fitted species, the comparison takes isotopologue intensities
+per charge, summed over the fitted apex ± 0.1 min, over every charge inside the scan window. It
+extracts the same way from the real run and from each simulation, so different scan grids compare
+directly.
+
+| Simulation | Envelope cos median (p25) | Charge-profile cos | Apex charge within 1 | log₁₀ sim/real p25 / p50 / p75 | Mean \|log₁₀ ratio\| |
+|---|---|---|---|---|---|
+| fitted to rep1 raw | 0.882 (0.812) | 0.991 | 78 % | −0.04 / 0.01 / 0.06 | 0.070 |
+| IDs, `self` template | 0.824 (0.744) | 0.985 | 69 % | −0.19 / −0.06 / 0.07 | 0.188 |
+| IDs, `train` template | 0.825 (0.738) | 0.985 | 66 % | −0.20 / −0.05 / 0.07 | 0.191 |
+
+This is the measure that separates the signal models. ID-only envelopes are nearly as well shaped as
+fitted ones (0.825 against 0.882). Their abundances scatter about 2.7× more, and the template makes no
+difference.
+
+**Peaks at S/N ≥ 10 only.** The noise level is the real scan's (2·10⁴ / injection time at m/z 650,
+with the Jurkat m/z shape). The simulated scan is cut at the same threshold. Medians over every 10th
+scan from 30 to 50 min:
+
+| Simulation | Count ratio | Real matched | Sim matched | cos |
+|---|---|---|---|---|
+| fitted | 1.38 | 0.17 | 0.15 | 0.133 |
+| IDs, `self` | 1.32 | 0.13 | 0.11 | 0.095 |
+| IDs, `train` | 1.21 | 0.13 | 0.09 | 0.080 |
+
+Per regime:
+
+- **41.1 min, histones:** the fitted simulation matches 74 % of the real S/N ≥ 10 peaks (cos 0.926).
+- **35.1 min, busy:** 2 % are matched.
+- **53.8 min, wash:** 1 % are matched.
+
+So outside the histone-dominated scans, most bright real peaks belong to nothing the simulation models.
+They are unidentified species. The simulation's own bright peaks there, 350–450 per scan in the busy
+and wash regions, are mostly the tail of the injected noise: the noise density is calibrated on peaks
+under S/N 10, and nothing constrains the tail above it. Both point at step 4's unidentified-analyte
+component. The median centroid intensity is not a usable noise level: the instrument reports only
+local maxima above its own threshold, so S/N 10 against that median kept 4 peaks per busy scan.
+
 ## Next
 
-1. A signal-focused comparison: per species, real versus simulated envelope intensity around the
-   apex, and peaks above S/N 10 only.
-2. A held-out test across fractions (e.g. rep2 fract5 or fract6 IDs with a fract7 template), to test
+1. A held-out test across fractions (e.g. rep2 fract5 or fract6 IDs with a fract7 template), to test
    how far the template transfers. The MM114 searches under `Rep2_Raw` have fract5 and fract6
    identifications.
-3. An unidentified-analyte component and an AGC model in place of the template (step 4 of the plan).
+2. An unidentified-analyte component and an AGC model in place of the template (step 4 of the plan).
