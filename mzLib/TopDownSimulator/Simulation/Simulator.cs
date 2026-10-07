@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using MassSpectrometry;
 using Readers;
@@ -458,6 +459,71 @@ public sealed class Simulator
         }
 
         File.WriteAllText(outputPath, sb.ToString());
+    }
+
+    /// <summary>
+    /// Reads back a sidecar written by <see cref="WriteGroundTruth(IReadOnlyList{ProteoformModel}, int, int, IPeakWidthModel, string)"/>,
+    /// which is enough to re-simulate the run without refitting.
+    /// </summary>
+    /// <remarks>
+    /// The width law is parsed from its <c>ToString</c> form, so only <see cref="ConstantPeakWidth"/>
+    /// and <see cref="OrbitrapPeakWidth"/> round-trip. Charge distributions other than Gaussian are
+    /// not written by the sidecar and cannot be read.
+    /// </remarks>
+    public static (ProteoformModel[] Models, int MinCharge, int MaxCharge, IPeakWidthModel WidthModel) ReadGroundTruth(string path)
+    {
+        var lines = File.ReadAllLines(path);
+        if (lines.Length == 0)
+            throw new InvalidDataException($"{path} is empty.");
+
+        var header = lines[0].Split('\t');
+        int Column(string name)
+        {
+            int index = Array.IndexOf(header, name);
+            return index >= 0 ? index : throw new InvalidDataException($"{path} has no {name} column.");
+        }
+
+        int id = Column("Identifier"), mass = Column("MonoisotopicMass"), abundance = Column("Abundance");
+        int mu = Column("RtMu"), sigma = Column("RtSigma"), tau = Column("RtTau");
+        int muZ = Column("ChargeMu"), sigmaZ = Column("ChargeSigma");
+        int minZ = Column("MinCharge"), maxZ = Column("MaxCharge"), width = Column("PeakWidthModel");
+
+        static double D(string s) => double.Parse(s, CultureInfo.InvariantCulture);
+
+        var models = new List<ProteoformModel>();
+        int minCharge = int.MaxValue, maxCharge = int.MinValue;
+        string? widthText = null;
+        foreach (var line in lines.Skip(1))
+        {
+            if (line.Length == 0) continue;
+            var f = line.Split('\t');
+            models.Add(new ProteoformModel(
+                D(f[mass]), D(f[abundance]),
+                new EmgProfile(D(f[mu]), D(f[sigma]), D(f[tau])),
+                new GaussianChargeDistribution(D(f[muZ]), D(f[sigmaZ])),
+                f[id].Length > 0 ? f[id] : null));
+            minCharge = Math.Min(minCharge, int.Parse(f[minZ], CultureInfo.InvariantCulture));
+            maxCharge = Math.Max(maxCharge, int.Parse(f[maxZ], CultureInfo.InvariantCulture));
+            widthText = f[width];
+        }
+
+        if (widthText is null)
+            throw new InvalidDataException($"{path} holds no proteoforms.");
+
+        return (models.ToArray(), minCharge, maxCharge, ParseWidthModel(widthText));
+    }
+
+    private static IPeakWidthModel ParseWidthModel(string text)
+    {
+        var constant = System.Text.RegularExpressions.Regex.Match(text, @"^Constant\(sigma=([^)]+)\)$");
+        if (constant.Success)
+            return new ConstantPeakWidth(double.Parse(constant.Groups[1].Value, CultureInfo.InvariantCulture));
+
+        var orbitrap = System.Text.RegularExpressions.Regex.Match(text, @"^Orbitrap\(k=([^)]+)\)$");
+        if (orbitrap.Success)
+            return new OrbitrapPeakWidth(double.Parse(orbitrap.Groups[1].Value, CultureInfo.InvariantCulture));
+
+        throw new InvalidDataException($"Cannot rebuild the peak width model '{text}'.");
     }
 
     public static void WriteGroundTruth(

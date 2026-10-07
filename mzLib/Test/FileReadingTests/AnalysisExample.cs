@@ -467,7 +467,7 @@ namespace Test.FileReadingTests
             int globalMaxCharge = int.MinValue;
 
             int counter = 0;
-            foreach (var (record, minCharge, maxCharge, _) in simulationRecords)
+            foreach (var (record, _, minCharge, maxCharge) in simulationRecords)
             {
                 if (minCharge > maxCharge)
                     continue;
@@ -595,7 +595,7 @@ namespace Test.FileReadingTests
             if (deduplicate)
                 Console.WriteLine($"Deduplicated q<=0.01 records: {loadedRecords.Length} -> {qFilteredRecords.Length} species");
             var qFilteredSliceRecords = qFilteredRecords
-                .Where(s => s.Record.RetentionTime >= rtStart && s.Record.RetentionTime <= rtEnd)
+                .Where(s => s.Anchor.RetentionTime >= rtStart && s.Anchor.RetentionTime <= rtEnd)
                 .ToArray();
 
             Assert.That(qFilteredSliceRecords, Is.Not.Empty, "No proteoforms passed q<=0.01 inside 31-35 min.");
@@ -691,18 +691,39 @@ namespace Test.FileReadingTests
         public static void ExportRep2FullNoisySimulation() =>
             ExportRep2NoisySimulation(rtStart: null, rtEnd: null, label: "full", writeClean: false);
 
-        private static void ExportRep2NoisySimulation(double? rtStart, double? rtEnd, string label, bool writeClean)
+        /// <summary>
+        /// The same full-run export for rep1 fract7, fitted to its own raw file. It is the upper bound
+        /// an ID-only simulation of rep1 is compared against; see <c>IdOnlySimulation</c>.
+        /// </summary>
+        [Test]
+        [Explicit("Writes a full-run noisy simulated mzML for rep1 fract7, fitted to its own raw file")]
+        public static void ExportRep1FullNoisySimulation() =>
+            ExportNoisySimulation(
+                @"D:\JurkatTopdown\02-18-20_jurkat_td_rep1_fract7.raw",
+                @"D:\JurkatTopdown\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\02-18-20_jurkat_td_rep1_fract7_Proteoforms.psmtsv",
+                rtStart: null, rtEnd: null, label: "full", writeClean: false);
+
+        private static void ExportRep2NoisySimulation(double? rtStart, double? rtEnd, string label, bool writeClean) =>
+            ExportNoisySimulation(
+                @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.raw",
+                @"D:\JurkatTopdown\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\02-18-20_jurkat_td_rep2_fract7_Proteoforms.psmtsv",
+                rtStart, rtEnd, label, writeClean);
+
+        private static void ExportNoisySimulation(
+            string rawFile, string resultFile, double? rtStart, double? rtEnd, string label, bool writeClean)
         {
             const double qValueThreshold = 0.01;
             const double rtHalfWidth = 0.25;
 
-            // Median noise amplitude at m/z 650 measured in this file's 50-55 min window.
+            // Median noise amplitude at m/z 650 measured in rep2 fract7's 50-55 min window. Only the
+            // unconditioned path uses it; per-scan conditioning takes the amplitude from each scan's
+            // injection time.
             const double measuredNoiseLevel = 663.0;
 
             double densityScale = GetNoiseDensityScale();
 
-            string rawPath = ResolveLocalPath(@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.raw");
-            string resultPath = ResolveLocalPath(@"D:\JurkatTopdown\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\02-18-20_jurkat_td_rep2_fract7_Proteoforms.psmtsv");
+            string rawPath = ResolveLocalPath(rawFile);
+            string resultPath = ResolveLocalPath(resultFile);
             string stem = Path.GetFileNameWithoutExtension(rawPath);
             string outDir = Path.GetDirectoryName(rawPath)!;
 
@@ -1151,7 +1172,8 @@ namespace Test.FileReadingTests
                     Score: p.Score,
                     FullSequence: p.FullSequence,
                     Accession: p.Accession,
-                    Identifier: BuildIdentifier(p)))
+                    Identifier: BuildIdentifier(p),
+                    PrecursorIntensity: p.PrecursorIntensity))
                 .OrderByDescending(r => r.Score)
                 .ThenBy(r => r.RetentionTime)
                 .ToArray();
@@ -1295,12 +1317,12 @@ namespace Test.FileReadingTests
         /// are all independent of how the work happened to be scheduled.
         /// </remarks>
         private static FitBatch FitProteoforms(
-            IReadOnlyList<Species> species,
+            IReadOnlyList<IdentifiedSpecies> species,
             GroundTruthExtractor extractor,
             double rtHalfWidth,
             bool fitPeakWidthModel = true)
         {
-            var records = species.Select(s => s.Record).ToArray();
+            var records = species.Select(s => s.Anchor).ToArray();
             var fits = new FittedProteoform[species.Count];
             var truths = new ProteoformGroundTruth[species.Count];
             var chargeRanges = new (int Min, int Max)[species.Count];
@@ -1309,7 +1331,7 @@ namespace Test.FileReadingTests
 
             Parallel.For(0, species.Count, i =>
             {
-                var record = species[i].Record;
+                var record = species[i].Anchor;
                 int minCharge = species[i].MinCharge;
                 int maxCharge = species[i].MaxCharge;
                 if (minCharge > maxCharge)
@@ -1437,81 +1459,16 @@ namespace Test.FileReadingTests
             return refitResult.FittedProteoforms.Select(f => f.Model).ToArray();
         }
 
-        /// <summary>
-        /// One simulated species: the record whose mass and retention time it is fitted at, and the
-        /// charge range its envelope is extracted over.
-        /// </summary>
-        private sealed record Species(MmResultRecord Record, int MinCharge, int MaxCharge, int MemberCount = 1);
-
-        /// <summary>Isotopologue spacing of averagine, in daltons.</summary>
-        private const double AveragineIsotopeSpacing = 1.00235;
+        /// <summary>Species-level grouping; see <see cref="SpeciesGrouper"/>.</summary>
+        private static IdentifiedSpecies[] DeduplicateBySpecies(IReadOnlyList<MmResultRecord> records) =>
+            SpeciesGrouper.Group(records);
 
         /// <summary>
         /// Each record as its own species, extracted over its precursor charge ± 2. What the
         /// pipeline did before species-level deduplication, kept for MZLIB_TOPDOWN_SIM_NO_DEDUP.
         /// </summary>
-        private static Species[] AsSpecies(IEnumerable<MmResultRecord> records) =>
-            records
-                .Select(r => new Species(r, Math.Max(2, r.PrecursorCharge - 2), Math.Min(80, r.PrecursorCharge + 2)))
-                .ToArray();
-
-        /// <summary>
-        /// Groups records that describe the same MS1 signal into one species, so it is fitted once.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// Two records are one species when they elute within <paramref name="rtTolerance"/> minutes
-        /// and their masses differ by a whole number of isotopologue spacings (0 to ±3) within
-        /// <paramref name="massTolerance"/> Da. That covers:
-        /// </para>
-        /// <list type="bullet">
-        /// <item>the same proteoform identified at several precursor charges;</item>
-        /// <item>identical sequences under different accessions;</item>
-        /// <item>isobaric localization variants;</item>
-        /// <item>off-by-one-dalton monoisotopic assignments;</item>
-        /// <item>near-isobaric pairs such as deamidation (+0.984 Da), which top-down MS1 cannot
-        /// separate from a +1 isotopologue shift.</item>
-        /// </list>
-        /// <para>
-        /// Fitted separately, each of those claims the whole observed envelope; at H2B in rep2
-        /// fract7, seven such models each predicted the full height of the same peak. Grouping is
-        /// greedy in descending score, so the best-scoring record anchors each species. Its
-        /// envelope is extracted over every member's precursor charge ± 2.
-        /// </para>
-        /// </remarks>
-        private static Species[] DeduplicateBySpecies(
-            IReadOnlyList<MmResultRecord> records,
-            double rtTolerance = 0.5,
-            double massTolerance = 0.03)
-        {
-            var anchors = new List<(MmResultRecord Record, int MinCharge, int MaxCharge, int Count)>();
-            foreach (var record in records.OrderByDescending(r => r.Score).ThenBy(r => r.RetentionTime))
-            {
-                int match = anchors.FindIndex(a =>
-                    Math.Abs(a.Record.RetentionTime - record.RetentionTime) <= rtTolerance
-                    && WithinIsotopeSpacings(a.Record.MonoisotopicMass, record.MonoisotopicMass, massTolerance));
-
-                int lo = Math.Max(2, record.PrecursorCharge - 2);
-                int hi = Math.Min(80, record.PrecursorCharge + 2);
-                if (match < 0)
-                {
-                    anchors.Add((record, lo, hi, 1));
-                    continue;
-                }
-
-                var a = anchors[match];
-                anchors[match] = (a.Record, Math.Min(a.MinCharge, lo), Math.Max(a.MaxCharge, hi), a.Count + 1);
-            }
-
-            return anchors.Select(a => new Species(a.Record, a.MinCharge, a.MaxCharge, a.Count)).ToArray();
-        }
-
-        private static bool WithinIsotopeSpacings(double a, double b, double tolerance)
-        {
-            double delta = b - a;
-            int n = (int)Math.Round(delta / AveragineIsotopeSpacing);
-            return Math.Abs(n) <= 3 && Math.Abs(delta - n * AveragineIsotopeSpacing) <= tolerance;
-        }
+        private static IdentifiedSpecies[] AsSpecies(IEnumerable<MmResultRecord> records) =>
+            SpeciesGrouper.Ungrouped(records);
 
         private static string BuildIdentifier(PsmFromTsv psm)
         {

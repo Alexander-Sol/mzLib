@@ -15,7 +15,8 @@ public sealed record MmResultRecord(
     double Score,
     string FullSequence,
     string? Accession,
-    string Identifier);
+    string Identifier,
+    double? PrecursorIntensity = null);
 
 /// <summary>
 /// Loads MetaMorpheus `.psmtsv` search results into a compact record shape the
@@ -44,10 +45,45 @@ public sealed class MmResultLoader
                 Score: p.Score,
                 FullSequence: p.FullSequence,
                 Accession: p.Accession,
-                Identifier: BuildIdentifier(p)))
+                Identifier: BuildIdentifier(p),
+                PrecursorIntensity: p.PrecursorIntensity))
             .OrderBy(p => p.FileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.RetentionTime)
             .ThenBy(p => p.MonoisotopicMass)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Identifications from one raw file at or below <paramref name="maxQValue"/>, best score first.
+    /// </summary>
+    /// <param name="fileNameWithoutExtension">The raw file the identifications must come from.</param>
+    public IReadOnlyList<MmResultRecord> LoadQualified(string psmTsvPath, string fileNameWithoutExtension, double maxQValue)
+    {
+        var file = new PsmFromTsvFile(psmTsvPath, new SpectrumMatchParsingParameters
+        {
+            ParseMatchedFragmentIons = false,
+        });
+        file.LoadResults();
+
+        return file.Results
+            .Where(p => p is not null)
+            .Where(p => string.Equals(p.FileNameWithoutExtension, fileNameWithoutExtension, StringComparison.OrdinalIgnoreCase))
+            .Where(p => p.MonoisotopicMass > 0 && p.RetentionTime >= 0)
+            .Where(p => !double.IsNaN(p.QValue) && p.QValue <= maxQValue)
+            .Select(p => new MmResultRecord(
+                FileNameWithoutExtension: p.FileNameWithoutExtension,
+                PrecursorScanNumber: p.PrecursorScanNum,
+                Ms2ScanNumber: p.Ms2ScanNumber,
+                PrecursorCharge: p.PrecursorCharge,
+                MonoisotopicMass: p.MonoisotopicMass,
+                RetentionTime: p.RetentionTime,
+                Score: p.Score,
+                FullSequence: p.FullSequence,
+                Accession: p.Accession,
+                Identifier: BuildIdentifier(p),
+                PrecursorIntensity: p.PrecursorIntensity))
+            .OrderByDescending(r => r.Score)
+            .ThenBy(r => r.RetentionTime)
             .ToArray();
     }
 

@@ -357,35 +357,8 @@ public class ScanRealismComparison
     }
 
     /// <summary>Rebuilds the simulated models from a sidecar written by <see cref="Simulator.WriteGroundTruth"/>.</summary>
-    private static (ProteoformModel[] Models, int MinCharge, int MaxCharge, IPeakWidthModel Width) LoadModels(string path)
-    {
-        var lines = File.ReadAllLines(path);
-        var header = lines[0].Split('\t');
-        int Col(string name) => Array.IndexOf(header, name);
-        double D(string[] f, string name) => double.Parse(f[Col(name)], CultureInfo.InvariantCulture);
-
-        var models = new List<ProteoformModel>();
-        int minZ = 0, maxZ = 0;
-        string widthText = "";
-        foreach (string line in lines.Skip(1).Where(l => l.Length > 0))
-        {
-            var f = line.Split('\t');
-            models.Add(new ProteoformModel(
-                D(f, "MonoisotopicMass"), D(f, "Abundance"),
-                new EmgProfile(D(f, "RtMu"), D(f, "RtSigma"), D(f, "RtTau")),
-                new GaussianChargeDistribution(D(f, "ChargeMu"), D(f, "ChargeSigma")),
-                f[Col("Identifier")]));
-            minZ = int.Parse(f[Col("MinCharge")], CultureInfo.InvariantCulture);
-            maxZ = int.Parse(f[Col("MaxCharge")], CultureInfo.InvariantCulture);
-            widthText = f[Col("PeakWidthModel")];
-        }
-
-        var constant = Regex.Match(widthText, @"^Constant\(sigma=([0-9.eE+-]+)\)$");
-        Assert.That(constant.Success, Is.True,
-            $"Only a constant peak width can be rebuilt from the sidecar; it records '{widthText}'.");
-        var width = new ConstantPeakWidth(double.Parse(constant.Groups[1].Value, CultureInfo.InvariantCulture));
-        return (models.ToArray(), minZ, maxZ, width);
-    }
+    private static (ProteoformModel[] Models, int MinCharge, int MaxCharge, IPeakWidthModel Width) LoadModels(string path) =>
+        Simulator.ReadGroundTruth(path);
 
     private static IRawDataPlus OpenRaw()
     {
