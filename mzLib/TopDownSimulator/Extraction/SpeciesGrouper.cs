@@ -49,19 +49,40 @@ public static class SpeciesGrouper
     /// <summary>Isotopologue spacing of averagine, in daltons.</summary>
     public const double AveragineIsotopeSpacing = 1.00235;
 
+    /// <summary>
+    /// Default window for <see cref="Group"/>'s <c>precursorMassWindow</c>: ±3 isotope spacings of
+    /// monoisotopic error plus half a dalton.
+    /// </summary>
+    public const double DefaultPrecursorMassWindow = 3.5;
+
+    /// <param name="precursorMassWindow">
+    /// When set, an identification also joins a species if its <em>measured</em> precursor mass lies
+    /// within this many daltons of the anchor's theoretical or measured mass. The theoretical mass is
+    /// what the search claims; the precursor mass is the envelope the MS2 was taken from. In rep1
+    /// fract7's histone window, 164 species from 434 identifications came out of theoretical-mass
+    /// grouping alone. Dozens of H2B interpretations sat on a handful of envelopes, each modelled at
+    /// that envelope's full precursor intensity.
+    /// </param>
     public static IdentifiedSpecies[] Group(
         IEnumerable<MmResultRecord> records,
         double rtTolerance = DefaultRtTolerance,
-        double massTolerance = DefaultMassTolerance)
+        double massTolerance = DefaultMassTolerance,
+        double? precursorMassWindow = null)
     {
         if (records is null) throw new ArgumentNullException(nameof(records));
+
+        bool SameEnvelope(MmResultRecord anchor, MmResultRecord record) =>
+            precursorMassWindow is { } window && record.PrecursorMass is > 0
+            && (Math.Abs(record.PrecursorMass.Value - anchor.MonoisotopicMass) <= window
+                || anchor.PrecursorMass is > 0 && Math.Abs(record.PrecursorMass.Value - anchor.PrecursorMass.Value) <= window);
 
         var groups = new List<List<MmResultRecord>>();
         foreach (var record in records.OrderByDescending(r => r.Score).ThenBy(r => r.RetentionTime))
         {
             var group = groups.FirstOrDefault(g =>
                 Math.Abs(g[0].RetentionTime - record.RetentionTime) <= rtTolerance
-                && WithinIsotopeSpacings(g[0].MonoisotopicMass, record.MonoisotopicMass, massTolerance));
+                && (WithinIsotopeSpacings(g[0].MonoisotopicMass, record.MonoisotopicMass, massTolerance)
+                    || SameEnvelope(g[0], record)));
 
             if (group is null)
                 groups.Add(new List<MmResultRecord> { record });

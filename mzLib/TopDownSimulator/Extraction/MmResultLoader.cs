@@ -16,7 +16,8 @@ public sealed record MmResultRecord(
     string FullSequence,
     string? Accession,
     string Identifier,
-    double? PrecursorIntensity = null);
+    double? PrecursorIntensity = null,
+    double? PrecursorMass = null);
 
 /// <summary>
 /// Loads MetaMorpheus `.psmtsv` search results into a compact record shape the
@@ -46,7 +47,8 @@ public sealed class MmResultLoader
                 FullSequence: p.FullSequence,
                 Accession: p.Accession,
                 Identifier: BuildIdentifier(p),
-                PrecursorIntensity: p.PrecursorIntensity))
+                PrecursorIntensity: p.PrecursorIntensity,
+                PrecursorMass: p.PrecursorMass))
             .OrderBy(p => p.FileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.RetentionTime)
             .ThenBy(p => p.MonoisotopicMass)
@@ -81,7 +83,8 @@ public sealed class MmResultLoader
                 FullSequence: p.FullSequence,
                 Accession: p.Accession,
                 Identifier: BuildIdentifier(p),
-                PrecursorIntensity: p.PrecursorIntensity))
+                PrecursorIntensity: p.PrecursorIntensity,
+                PrecursorMass: p.PrecursorMass))
             .OrderByDescending(r => r.Score)
             .ThenBy(r => r.RetentionTime)
             .ToArray();

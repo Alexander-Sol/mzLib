@@ -1239,7 +1239,8 @@ namespace Test.FileReadingTests
                     FullSequence: p.FullSequence,
                     Accession: p.Accession,
                     Identifier: BuildIdentifier(p),
-                    PrecursorIntensity: p.PrecursorIntensity))
+                    PrecursorIntensity: p.PrecursorIntensity,
+                    PrecursorMass: p.PrecursorMass))
                 .OrderByDescending(r => r.Score)
                 .ThenBy(r => r.RetentionTime)
                 .ToArray();
@@ -1543,9 +1544,16 @@ namespace Test.FileReadingTests
             return refitResult.FittedProteoforms.Select(f => f.Model).ToArray();
         }
 
-        /// <summary>Species-level grouping; see <see cref="SpeciesGrouper"/>.</summary>
+        /// <summary>
+        /// Species-level grouping; see <see cref="SpeciesGrouper"/>. With
+        /// MZLIB_TOPDOWN_SIM_GROUPING=precursor, identifications measured on the same precursor
+        /// envelope are merged too, whatever proteoform they claim.
+        /// </summary>
         private static IdentifiedSpecies[] DeduplicateBySpecies(IReadOnlyList<MmResultRecord> records) =>
-            SpeciesGrouper.Group(records);
+            SpeciesGrouper.Group(records, precursorMassWindow:
+                Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_GROUPING")?.Trim().ToLowerInvariant() == "precursor"
+                    ? SpeciesGrouper.DefaultPrecursorMassWindow
+                    : null);
 
         /// <summary>
         /// Each record as its own species, extracted over its precursor charge ± 2. What the

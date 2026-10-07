@@ -68,6 +68,22 @@ public class IdOnlySimulation
 
     private static string TestStem => HeldOut.Stem;
 
+    /// <summary>
+    /// Whether species grouping also merges identifications measured on the same precursor envelope
+    /// (MZLIB_TOPDOWN_SIM_GROUPING=precursor) or only those whose theoretical masses are isotope
+    /// spacings apart (default). ID-only exports from precursor grouping carry "-pgroup".
+    /// </summary>
+    private static bool PrecursorGrouping =>
+        Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_GROUPING")?.Trim().ToLowerInvariant() == "precursor";
+
+    private static string GroupSuffix => PrecursorGrouping ? "-pgroup" : "";
+
+    private static IdentifiedSpecies[] GroupSpecies(IEnumerable<MmResultRecord> records) =>
+        SpeciesGrouper.Group(records, precursorMassWindow: PrecursorGrouping ? SpeciesGrouper.DefaultPrecursorMassWindow : null);
+
+    private static IdentifiedSpecies[] LoadSpecies(string stem) =>
+        GroupSpecies(new MmResultLoader().LoadQualified(PsmPath(stem), stem, QValue));
+
     private static string PsmPath(string stem) =>
         stem == TrainStem || stem == "02-18-20_jurkat_td_rep1_fract7"
             ? $@"{Dir}\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\{stem}_Proteoforms.psmtsv"
@@ -108,7 +124,7 @@ public class IdOnlySimulation
     private static string FittedMzml(string stem) => $@"{RunDir(stem)}\{stem}.full{FitTag}.noisy.simulated.mzML";
     private static string PriorsPath => $@"{Dir}\idonly-priors.{TrainStem}{DerivedTag}.json";
     private static string IdOnlyMzml(string template, ChargePredictor charge) =>
-        $@"{HeldOut.Directory}\{TestStem}.idonly-{template}{ChargeSuffix(charge)}{DerivedTag}.noisy.simulated.mzML";
+        $@"{HeldOut.Directory}\{TestStem}.idonly-{template}{ChargeSuffix(charge)}{GroupSuffix}{DerivedTag}.noisy.simulated.mzML";
 
     private static string ChargeSuffix(ChargePredictor charge) => charge switch
     {
@@ -152,7 +168,7 @@ public class IdOnlySimulation
     [Explicit("Learns ID-only priors from rep2 fract7's fitted models")]
     public static void TrainPriors()
     {
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TrainStem), TrainStem, QValue));
+        var species = LoadSpecies(TrainStem);
         var (models, _, _, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
         var priors = IdOnlyPriors.Fit(species, models, $"{TrainStem}, {species.Length} species, width {width}");
         priors.Save(PriorsPath);
@@ -177,7 +193,7 @@ public class IdOnlySimulation
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var priors = IdOnlyPriors.Load(PriorsPath);
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var models = priors.Predict(species, chargePredictor: Charge);
 
         // Without precursor charges the range has to come from the predicted distributions too.
@@ -316,7 +332,7 @@ public class IdOnlySimulation
     private static void CompareSpeciesEnvelopes(MsDataScan[] real, List<(string Label, MsDataScan[] Scans)> simulations)
     {
         const double halfWidth = 0.1;
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var anchors = species.Select(s => s.Anchor.Identifier).ToHashSet();
         var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));
         var realExtractor = new GroundTruthExtractor(real, ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
@@ -373,7 +389,7 @@ public class IdOnlySimulation
     {
         const int minZ = 5, maxZ = 40;
         var priors = IdOnlyPriors.Load(PriorsPath);
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var bySpecies = species.ToDictionary(s => s.Anchor.Identifier);
         var observedCharge = priors.Predict(species).ToDictionary(m => m.Identifier!);
         var sequenceCharge = priors.Predict(species, chargePredictor: ChargePredictor.SequenceOnly).ToDictionary(m => m.Identifier!);
@@ -515,7 +531,7 @@ public class IdOnlySimulation
         var priors = IdOnlyPriors.Load(PriorsPath);
         var profile = AcquisitionProfile.Load(AcquisitionProfilePath);
         var unidentified = System.Text.Json.JsonSerializer.Deserialize<UnidentifiedAnalytes>(File.ReadAllText(UnidentifiedPath))!;
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var models = priors.Predict(species, chargePredictor: Charge);
         var (fitted, _, _, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
         double[] scanTimes = profile.ScanTimes();
@@ -533,6 +549,55 @@ public class IdOnlySimulation
 
         Console.WriteLine($"wrote {export.MzmlPath}: {export.ScanCount} scans, {export.PeakCount / (double)export.ScanCount:F0} peaks/scan, " +
                           $"{export.FeatureCount} features, total {sw.Elapsed}");
+    }
+
+    /// <summary>
+    /// The species of the histone window (40–44 min, 11–16 kDa) of the held-out run, as grouped, with
+    /// what each identification measured (precursor mass) against what it claims (theoretical mass),
+    /// and what the joint refit against the raw file left each species. Species whose members'
+    /// precursor masses fall on another species' envelope are flagged: they are the same MS1 signal
+    /// under a different interpretation.
+    /// </summary>
+    [Test]
+    [Explicit("Lists the held-out run's histone-window species and the envelopes they share")]
+    public static void ListHistoneWindowSpecies()
+    {
+        var records = new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue);
+        var species = GroupSpecies(records);
+        var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));
+        var fittedById = fitted.Where(f => f.Identifier is not null).ToDictionary(f => f.Identifier!);
+        var predicted = IdOnlyPriors.Load(PriorsPath).Predict(species, chargePredictor: Charge).ToDictionary(m => m.Identifier!);
+
+        var window = species.Where(s => s.Anchor.RetentionTime is >= 40 and <= 44 && s.Anchor.MonoisotopicMass is >= 11000 and <= 16000)
+            .OrderBy(s => s.Anchor.MonoisotopicMass).ToArray();
+        var measured = records.Where(r => r.RetentionTime is >= 39.5 and <= 44.5 && r.PrecursorMass is > 0).ToArray();
+        Console.WriteLine($"{species.Length} species in all; {window.Length} in the window, from {window.Sum(s => s.Members.Length)} identifications");
+
+        // Measured minus theoretical, in isotope spacings and remainder.
+        var deltas = window.SelectMany(s => s.Members).Where(m => m.PrecursorMass is > 0)
+            .Select(m => m.PrecursorMass!.Value - m.MonoisotopicMass).ToArray();
+        Console.WriteLine($"precursor minus theoretical mass over the window's identifications: " +
+                          string.Join(", ", deltas.GroupBy(d => Math.Round(d / SpeciesGrouper.AveragineIsotopeSpacing)).OrderBy(g => g.Key)
+                              .Select(g => $"{g.Key:+0;-0;0} spacings x{g.Count()}")));
+
+        int shared = 0;
+        Console.WriteLine($"  {"theo mass",9} {"rt",6} {"ids",3} {"precursor masses",-28} {"refit log A",11} {"pred log A",10}  sequence / sharing");
+        foreach (var s in window)
+        {
+            // Another species' identification measured on this species' envelope.
+            var others = measured.Where(r => !s.Members.Contains(r) && Math.Abs(r.RetentionTime - s.Anchor.RetentionTime) <= 0.5
+                                             && SpeciesGrouper.WithinIsotopeSpacings(s.Anchor.MonoisotopicMass, r.PrecursorMass!.Value, 0.05)).ToArray();
+            if (others.Length > 0) shared++;
+            string refit = fittedById.TryGetValue(s.Anchor.Identifier, out var f) && f.Abundance > 0 ? Math.Log10(f.Abundance).ToString("F2") : "-";
+            string pred = predicted.TryGetValue(s.Anchor.Identifier, out var p) ? Math.Log10(p.Abundance).ToString("F2") : "-";
+            string masses = string.Join(" ", s.Members.Where(m => m.PrecursorMass is > 0).Select(m => m.PrecursorMass!.Value).Distinct().Take(3).Select(m => m.ToString("F1")));
+            string seq = System.Text.RegularExpressions.Regex.Replace(s.Anchor.FullSequence, @"\[[^\]]*:([^\]]*)\]", "[$1]");
+            Console.WriteLine($"  {s.Anchor.MonoisotopicMass,9:F2} {s.Anchor.RetentionTime,6:F2} {s.Members.Length,3} {masses,-28} {refit,11} {pred,10}  " +
+                              $"{(seq.Length > 60 ? seq[..60] + "…" : seq)}" +
+                              (others.Length > 0 ? $"  << {others.Length} other IDs measured here: {string.Join(", ", others.Select(o => o.MonoisotopicMass.ToString("F1")).Distinct().Take(4))}" : ""));
+        }
+
+        Console.WriteLine($"{shared}/{window.Length} species have another species' identification measured on their envelope");
     }
 
     /// <summary>
@@ -610,7 +675,7 @@ public class IdOnlySimulation
         var priors = IdOnlyPriors.Load(PriorsPath);
         var profile = AcquisitionProfile.Load(AcquisitionProfilePath);
         var unidentified = System.Text.Json.JsonSerializer.Deserialize<UnidentifiedAnalytes>(File.ReadAllText(UnidentifiedPath))!;
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var models = priors.Predict(species, chargePredictor: Charge);
         var (fitted, _, _, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
         var background = unidentified.Draw(fitted, profile.FirstScanTime, profile.LastScanTime, seed: 1);
@@ -646,7 +711,7 @@ public class IdOnlySimulation
     public static void ChargeApexProfiles()
     {
         const int minZ = 5, maxZ = 40;
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var extractor = new GroundTruthExtractor(ReadMs1(RawPath(TestStem)), ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
         var floors = new List<double>();
         int shown = 0;
@@ -672,7 +737,7 @@ public class IdOnlySimulation
     private static void CompareParameters(ChargePredictor chargePredictor)
     {
         var priors = IdOnlyPriors.Load(PriorsPath);
-        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var species = LoadSpecies(TestStem);
         var predicted = priors.Predict(species, chargePredictor: chargePredictor).ToDictionary(m => m.Identifier!);
         var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));
 

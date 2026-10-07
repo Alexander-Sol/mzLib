@@ -39,6 +39,27 @@ public class IdOnlyPriorsTests
     }
 
     [Test]
+    public void PrecursorGroupingMergesInterpretationsOfOneEnvelope()
+    {
+        // Three interpretations of the envelope measured at ~13766, one real neighbour +29 Da away.
+        var records = new[]
+        {
+            Record("a", 13766.50, 41.0, 18, score: 30) with { PrecursorMass = 13766.5 },
+            Record("b", 13781.52, 41.1, 17, score: 20) with { PrecursorMass = 13765.5 },   // claims +15 Da, measured here
+            Record("c", 13748.52, 41.2, 19, score: 15) with { PrecursorMass = 13768.5 },   // claims -18 Da, measured here
+            Record("d", 13795.52, 41.0, 18, score: 25) with { PrecursorMass = 13795.5 },   // a separate envelope
+        };
+
+        var byTheory = SpeciesGrouper.Group(records);
+        var byEnvelope = SpeciesGrouper.Group(records, precursorMassWindow: SpeciesGrouper.DefaultPrecursorMassWindow);
+
+        Assert.That(byTheory, Has.Length.EqualTo(4));
+        Assert.That(byEnvelope, Has.Length.EqualTo(2));
+        Assert.That(byEnvelope.Single(s => s.Anchor.Identifier == "a").Members.Select(m => m.Identifier),
+            Is.EquivalentTo(new[] { "a", "b", "c" }));
+    }
+
+    [Test]
     public void FitRecoversTheRegressionsItWasTrainedOn()
     {
         // Abundance = 10 x summed intensity, charge centre = mean charge + 0.1 K+R, apex 0.05 min late.
