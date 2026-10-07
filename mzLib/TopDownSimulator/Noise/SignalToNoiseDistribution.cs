@@ -35,6 +35,18 @@ public sealed record SignalToNoiseDistribution(double Threshold, double MeanExce
     /// </remarks>
     public static readonly SignalToNoiseDistribution Orbitrap = new(Threshold: 1.565, MeanExcess: 1.707);
 
+    /// <summary>
+    /// Fitted to the reported centroid <i>intensities</i> rather than to Thermo's S/N: with a
+    /// lognormal level spread of σ 0.25 (<see cref="NoiseFloorModel.JurkatLevelDispersion"/>) it
+    /// reproduces the scale-free shape of rep2 fract7's noise in both the busy and the wash regions,
+    /// p10 / p25 / p75 / p90 / p99 of 0.64 / 0.78 / 1.33 / 1.78 / 3.0 times the median (measured 0.63 /
+    /// 0.78 / 1.37 / 1.85 / 2.94; <see cref="Orbitrap"/> with σ 0.42 gave 0.48 / 0.67 / 1.54 / 2.32 /
+    /// 4.8). Intensities are narrower than S/N because Thermo's per-peak noise estimate is
+    /// anticorrelated with the S/N a peak reaches. Scaled so its median stays at the measured S/N
+    /// median of 2.75, so a noise level keeps meaning what the jitter laws and detection floor assume.
+    /// </summary>
+    public static readonly SignalToNoiseDistribution OrbitrapCentroids = new(Threshold: 1.94, MeanExcess: 1.165);
+
     public double Threshold { get; init; } = Threshold > 0 && double.IsFinite(Threshold)
         ? Threshold
         : throw new ArgumentOutOfRangeException(nameof(Threshold), Threshold, "Threshold must be finite and positive.");

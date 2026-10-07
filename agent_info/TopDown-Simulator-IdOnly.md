@@ -370,6 +370,47 @@ plus noise TIC lands near the real TIC.
 - **Per-species envelopes worsen slightly** (0.825 → 0.793 on rep1), because the unidentified
   species overlap the identified ones' extraction windows.
 
+## Grouping by precursor envelope, and noise intensity (`.v4`, `.v5`)
+
+**Precursor grouping** (`SpeciesGrouper.Group(precursorMassWindow: 3.5)`,
+`MZLIB_TOPDOWN_SIM_GROUPING=precursor`).
+- **The problem:** the search's theoretical masses split one MS1 envelope into many interpretations.
+  In rep1's histone window (40–44 min, 11–16 kDa), 434 identifications made 164 species, about 90 of
+  them H2B forms. Each was modelled at the shared envelope's full precursor intensity.
+- **The rule:** identifications also merge when their *measured* precursor mass lies within 3.5 Da of
+  the anchor.
+- **Species:** rep1 478 → 329, rep2 474 → 309.
+- **Effect (`.v4`):**
+  - ID-only abundance r 0.69 → 0.83;
+  - cos at 41.1 min 0.60 → 0.73 without a template, 0.56 → 0.74 with the rep2 template;
+  - fitted rep2 unexplained energy 0.36 → 0.44.
+
+**Noise intensity** (`CompareNoiseIntensities`, `AgcCharacterization.CharacterizeNoiseIntensity`):
+- **What was wrong:** counts matched to within 10 %, but intensities did not.
+  - Before elution, at the 50 ms injection-time cap, the simulated noise was 3–9× too bright,
+    growing with m/z.
+  - At high m/z it was 1.5–2.6× too bright in the busy region and the wash.
+  - The spread was too wide everywhere: p90/p50 2.3 against 1.8.
+- **The fixes:**
+  - `SignalToNoiseDistribution.OrbitrapCentroids` plus a level spread of σ 0.25, fitted to the
+    scale-free intensity shape. Thermo's S/N is wider than the intensities.
+  - The default m/z level shape refitted to the wash's centroid medians: a 2.5× rise in place of
+    4.6×.
+  - `ScanNoiseConditions` takes each scan's level per 100-Th band from the median of its own peaks
+    below S/N 10.
+  - `AcquisitionProfile.LevelCorrection` carries the same correction as a curve over RT and m/z for
+    runs without a template.
+  - `NoiseRelativeFloor.MinOver` now checks interior knots.
+- **Result (`.v5`, rep1):**
+  - median noise intensity 0.96–1.09× real in almost every regime and band, worst 1.5× at m/z
+    1200–2000 in the early stretch;
+  - whole-scan cos at 35.1 min 0.20 → 0.25, wash 0.21 → 0.25;
+  - KS against the scan maximum in the wash 0.6 → 0.1–0.15.
+  - The KS rose in the pre-elution and busy scans. KS against the scan's own maximum is fragile when
+    the tail changes, and the quantile comparison is the direct measure.
+- **What remains:** the excess bright peaks in the no-template simulation are its synthetic
+  unidentified species (34.2, 42.0 and 43.3 min: 4–16× the bright TIC), not noise.
+
 ## Next
 
 1. Calibrate the unidentified component with the noise injected, so its tail above S/N 10 counts.

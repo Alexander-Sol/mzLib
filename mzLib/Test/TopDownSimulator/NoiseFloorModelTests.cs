@@ -108,24 +108,31 @@ public class NoiseFloorModelTests
     }
 
     [Test]
-    public void NoiseLevelRisesToAPlateauNearMz1450()
+    public void NoiseLevelRisesToAPlateauFromMz1100()
     {
         var model = new NoiseFloorModel(noiseLevelAtReferenceMz: 1000);
 
         Assert.That(model.NoiseLevelAt(650), Is.EqualTo(1000).Within(1e-9));
-        Assert.That(model.NoiseLevelAt(1450), Is.EqualTo(4630).Within(1e-9));
+        Assert.That(model.NoiseLevelAt(1450), Is.EqualTo(2510).Within(1e-9));
 
         // Held flat outside the calibrated range rather than extrapolated.
         Assert.That(model.NoiseLevelAt(100), Is.EqualTo(model.NoiseLevelAt(650)).Within(1e-9));
         Assert.That(model.NoiseLevelAt(5000), Is.EqualTo(model.NoiseLevelAt(1950)).Within(1e-9));
+    }
 
-        // Unimodal, which NoiseRelativeFloor.MinOver relies on.
-        var levels = Enumerable.Range(0, 140).Select(i => model.NoiseLevelAt(600 + i * 10)).ToArray();
-        int peakIndex = Array.IndexOf(levels, levels.Max());
-        for (int i = 1; i <= peakIndex; i++)
-            Assert.That(levels[i], Is.GreaterThanOrEqualTo(levels[i - 1]), $"not rising at {600 + i * 10}");
-        for (int i = peakIndex + 1; i < levels.Length; i++)
-            Assert.That(levels[i], Is.LessThanOrEqualTo(levels[i - 1]), $"not falling at {600 + i * 10}");
+    [Test]
+    public void FloorMinimumFindsAnInteriorDip()
+    {
+        // A measured level that dips between its ends, as per-scan levels can.
+        var levels = new double[NoiseFloorModel.BinCount];
+        for (int b = 0; b < levels.Length; b++) levels[b] = 1000;
+        levels[4] = 300;   // the bin centred on m/z 1050
+        var model = new NoiseFloorModel().WithLevels(levels);
+        var floor = new NoiseRelativeFloor(model);
+
+        Assert.That(model.MinLevelOver(800, 1300), Is.EqualTo(300).Within(1e-9));
+        Assert.That(floor.MinOver(800, 1300), Is.EqualTo(floor.At(1050)).Within(1e-9));
+        Assert.That(model.MinLevelOver(1200, 1300), Is.EqualTo(1000).Within(1e-9));
     }
 
     [Test]
@@ -159,44 +166,34 @@ public class NoiseFloorModelTests
 
     /// <summary>
     /// The end-to-end fidelity check: the <i>shape</i> of the simulated noise intensity distribution
-    /// against the one measured in rep1 fract7's 50-55 min window. This is what the model exists to
-    /// reproduce, and it is the assertion that fails first if the density curve, the level curve,
-    /// the S/N distribution, or the dispersion drifts.
+    /// within one 100-Th band, against the one measured in rep2 fract7. This is what the model exists
+    /// to reproduce, and it is the assertion that fails first if the S/N distribution or the
+    /// dispersion drifts.
     /// </summary>
     /// <remarks>
-    /// Compared as ratios to the median rather than in absolute intensity, because the absolute
-    /// amplitude is the model's one free parameter — it spanned a factor of 3 across the four
-    /// calibration files — and is meant to be set per run. The shape is what is claimed to be
-    /// transferable, so the shape is what is tested.
+    /// Compared as ratios to the band's median, because the amplitude is set per scan and per band
+    /// (<see cref="ScanNoiseConditions"/>). Measured with <c>AgcCharacterization.CharacterizeNoiseIntensity</c>:
+    /// every peak below S/N 10 over its scan's median in the same band, pooled over the busy (35–45 min)
+    /// and wash (55–70 min) regions, which agree.
     /// </remarks>
     [Test]
     public void SampledIntensityDistributionHasTheMeasuredShape()
     {
-        // Measured intensity quantiles, rep1 fract7, 50-55 min.
-        const double measuredP25 = 2667, measuredP50 = 4316, measuredP75 = 7113, measuredP95 = 15730;
+        var measured = new[] { (0.10, 0.63), (0.25, 0.775), (0.75, 1.37), (0.90, 1.85), (0.99, 2.94) };
 
         var model = new NoiseFloorModel(noiseLevelAtReferenceMz: Rep1Fract7NoiseLevel);
-        var intensities = SampleScans(model, 5).Select(p => p.Intensity).ToArray();
+        var intensities = SampleScans(model, 20).Where(p => p.Mz is >= 700 and < 800).Select(p => p.Intensity).ToArray();
         double median = Quantile(intensities, 0.50);
 
         Assert.Multiple(() =>
         {
-            foreach (var (q, measured) in new[]
-                     { (0.25, measuredP25), (0.75, measuredP75), (0.95, measuredP95) })
+            foreach (var (q, measuredRatio) in measured)
             {
                 double simulatedRatio = Quantile(intensities, q) / median;
-                double measuredRatio = measured / measuredP50;
-                TestContext.Out.WriteLine(
-                    $"p{q * 100:F0}/p50: simulated {simulatedRatio:F3}, measured {measuredRatio:F3}, " +
-                    $"ratio {simulatedRatio / measuredRatio:F3}");
-                Assert.That(simulatedRatio, Is.EqualTo(measuredRatio).Within(0.10 * measuredRatio),
+                TestContext.Out.WriteLine($"p{q * 100:F0}/p50: simulated {simulatedRatio:F3}, measured {measuredRatio:F3}");
+                Assert.That(simulatedRatio, Is.EqualTo(measuredRatio).Within(0.08 * measuredRatio),
                     $"intensity quantile ratio p{q * 100:F0}/p50");
             }
-
-            // The absolute scale should still land in the right order of magnitude when the measured
-            // amplitude for this file is supplied.
-            TestContext.Out.WriteLine($"p50: simulated {median:F0}, measured {measuredP50:F0}");
-            Assert.That(median, Is.EqualTo(measuredP50).Within(0.25 * measuredP50));
         });
     }
 
@@ -242,7 +239,7 @@ public class NoiseFloorModelTests
         var model = new NoiseFloorModel(noiseLevelAtReferenceMz: 1000);
         var floor = new NoiseRelativeFloor(model);
 
-        Assert.That(floor.SnThreshold, Is.EqualTo(SignalToNoiseDistribution.Orbitrap.Threshold));
+        Assert.That(floor.SnThreshold, Is.EqualTo(SignalToNoiseDistribution.OrbitrapCentroids.Threshold));
         Assert.That(floor.At(650), Is.EqualTo(1000 * floor.SnThreshold).Within(1e-9));
         Assert.That(floor.At(1450), Is.GreaterThan(floor.At(650)));
         Assert.That(floor.MinOver(650, 1450), Is.EqualTo(floor.At(650)).Within(1e-9));

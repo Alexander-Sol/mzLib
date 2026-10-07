@@ -91,6 +91,84 @@ public class AgcCharacterization
         }
     }
 
+    /// <summary>
+    /// The shape of the noise intensity distribution on rep2 fract7, free of its amplitude: every
+    /// peak below S/N 10 divided by the median of its scan's peaks in the same 100-Th band, pooled by
+    /// regime. Also the measured median against the injection-time model's level, per band.
+    /// </summary>
+    [Test]
+    [Explicit("Measures the scale-free noise intensity shape and the amplitude against 2e4/IT on rep2 fract7")]
+    public static void CharacterizeNoiseIntensity()
+    {
+        var file = MsDataFileReader.GetDataFile(Raws[0]);
+        file.LoadAllStaticData();
+        var ms1 = file.GetAllScansList().Where(s => s.MsnOrder == 1).OrderBy(s => s.RetentionTime).ToArray();
+        var regimes = new (string Name, double From, double To)[] { ("quiet 0-28", 0, 28), ("busy 35-45", 35, 45), ("wash 55-70", 55, 70) };
+        double[] qs = { 0.1, 0.25, 0.75, 0.9, 0.99 };
+
+        foreach (var (name, from, to) in regimes)
+        {
+            var pooled = new List<double>();
+            var ratioByBand = Enumerable.Range(0, NoiseFloorModel.BinCount).Select(_ => new List<double>()).ToArray();
+            foreach (var s in ms1.Where(s => s.RetentionTime >= from && s.RetentionTime < to))
+            {
+                var model = new NoiseFloorModel(NoiseFloorModel.JurkatNoiseTimesInjectionTime / (s.InjectionTime ?? 50));
+                var mz = s.MassSpectrum.XArray;
+                var y = s.MassSpectrum.YArray;
+                for (int b = 0; b < NoiseFloorModel.BinCount; b++)
+                {
+                    double lo = NoiseFloorModel.BinStart(b), hi = lo + 100;
+                    var v = new List<double>();
+                    for (int i = 0; i < mz.Length; i++)
+                        if (mz[i] >= lo && mz[i] < hi && y[i] < 10 * model.NoiseLevelAt(mz[i])) v.Add(y[i]);
+                    if (v.Count < 20) continue;
+                    v.Sort();
+                    double median = v[v.Count / 2];
+                    pooled.AddRange(v.Select(x => x / median));
+                    ratioByBand[b].Add(median / model.NoiseLevelAt(lo + 50));
+                }
+            }
+
+            pooled.Sort();
+            Console.WriteLine($"{name}: {pooled.Count} peaks; intensity / scan-band median at " +
+                              string.Join(", ", qs.Select(q => $"p{q * 100:F0} {pooled[(int)(q * pooled.Count)]:F2}")));
+            Console.WriteLine("  median intensity / (2e4/IT model level), by band from m/z 600: " +
+                              string.Join(" ", ratioByBand.Select(r => r.Count == 0 ? "-" : Median(r).ToString("F2"))));
+        }
+
+        // The model's own shape for comparison, at the current defaults.
+        var rng = new Random(1);
+        var current = new NoiseFloorModel(1000.0);
+        var sample = new List<SimulatedPeak>();
+        for (int i = 0; i < 20; i++) current.SampleScan(rng, sample);
+        var band = sample.Where(p => p.Mz is >= 700 and < 800).Select(p => p.Intensity).OrderBy(x => x).ToList();
+        double m = band[band.Count / 2];
+        Console.WriteLine($"model at defaults (m/z 700-800): " + string.Join(", ", qs.Select(q => $"p{q * 100:F0} {band[(int)(q * band.Count)] / m:F2}")) +
+                          $"; median / level {m / current.NoiseLevelAt(750):F2}");
+
+        // Candidate shapes: S/N = threshold + exponential excess of mean ratio x threshold, times a
+        // lognormal level spread of sigma d. Target: the wash and busy shapes above.
+        double[] target = { 0.63, 0.775, 1.37, 1.85, 2.94 };
+        var best = (Ratio: 0.0, Dispersion: 0.0, Error: double.PositiveInfinity);
+        foreach (double ratio in new[] { 0.5, 0.6, 0.7, 0.8, 0.9 })
+        foreach (double d in new[] { 0.0, 0.1, 0.15, 0.2, 0.25, 0.3 })
+        {
+            var distribution = new SignalToNoiseDistribution(1.565, ratio * 1.565);
+            var r = new Random(2);
+            var v = Enumerable.Range(0, 200000).Select(_ => distribution.Sample(r) * Math.Exp(d * NormalSample(r))).OrderBy(x => x).ToArray();
+            double med = v[v.Length / 2];
+            var shape = qs.Select(q => v[(int)(q * v.Length)] / med).ToArray();
+            double error = shape.Zip(target, (a, b) => Math.Pow(Math.Log(a / b), 2)).Sum();
+            Console.WriteLine($"  ratio {ratio:F1} d {d:F2}: " + string.Join(" ", shape.Select(x => x.ToString("F2"))) + $"  median {med:F2}  err {error:F4}");
+            if (error < best.Error) best = (ratio, d, error);
+        }
+
+        Console.WriteLine($"best: excess ratio {best.Ratio:F1}, dispersion {best.Dispersion:F2}");
+    }
+
+    private static double NormalSample(Random r) =>
+        Math.Sqrt(-2 * Math.Log(1 - r.NextDouble())) * Math.Cos(2 * Math.PI * r.NextDouble());
+
     private static double SignalPeaksTic(MsDataScan scan, NoiseFloorModel noise, bool above)
     {
         double total = 0;

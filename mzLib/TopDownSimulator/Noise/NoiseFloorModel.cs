@@ -71,14 +71,22 @@ public sealed class NoiseFloorModel
     public const double JurkatNoiseTimesInjectionTime = 2.0e4;
 
     private readonly double[] _peaksPerBin;
+    private readonly double[]? _levelPerBin;
 
     /// <summary>
-    /// Noise amplitude in each bin relative to the first, averaged over the four calibration files.
-    /// Rises ~4.6× to a plateau near m/z 1450–1650 and then falls away.
+    /// Noise amplitude in each bin relative to the first, from the median reported intensity of the
+    /// peaks below S/N 10 in rep2 fract7's wash (55–70 min). Rises ~2.5× to a plateau from m/z 1100.
     /// </summary>
+    /// <remarks>
+    /// The earlier table (1.00 … 4.63 … 3.32, a 4.6× rise) was Thermo's own noise estimate averaged
+    /// over four files. Reported centroid intensities rise less steeply than that estimate, and with
+    /// it the simulated noise above m/z 1200 came out 1.5–3× brighter than the real wash and up to 9×
+    /// brighter before elution. Per-scan amplitude conditioning (<see cref="ScanNoiseConditions"/>)
+    /// replaces this shape wherever a source scan is available.
+    /// </remarks>
     private static readonly double[] RelativeNoiseLevelPerBin =
     {
-        1.00, 1.47, 2.04, 2.68, 3.26, 3.77, 4.04, 4.47, 4.63, 4.57, 4.55, 4.07, 3.82, 3.32,
+        1.00, 1.25, 1.51, 1.76, 2.22, 2.30, 2.47, 2.44, 2.51, 2.48, 2.47, 2.50, 2.41, 2.41,
     };
 
     /// <summary>Geometric mean of the measured noise amplitude at m/z 650 across the four files.</summary>
@@ -101,21 +109,42 @@ public sealed class NoiseFloorModel
     /// negatively correlated and this model treats them as independent. The default below is
     /// therefore fitted to reproduce the measured <i>intensity</i> quantile ratios, which is what a
     /// feature finder actually sees, rather than to the amplitude spread in isolation.
+    /// <para>
+    /// Refitted on 2026-10-07 together with <see cref="SignalToNoiseDistribution.OrbitrapCentroids"/>,
+    /// against every peak below S/N 10 in rep2 fract7 divided by its scan's median in the same
+    /// 100-Th band. The earlier 0.42 with <see cref="SignalToNoiseDistribution.Orbitrap"/> gave p90 and
+    /// p99 at 2.3× and 4.8× the median against a measured 1.8× and 2.9×.
+    /// </para>
     /// </remarks>
-    public const double JurkatLevelDispersion = 0.42;
+    public const double JurkatLevelDispersion = 0.25;
 
     /// <param name="peaksPerScanPerBin">
     /// Expected noise peaks per scan in each of the <see cref="BinCount"/> 100-Th bins from m/z 600,
     /// or null for the Jurkat quiet-window calibration. A per-scan table is how
     /// <see cref="ScanNoiseConditions"/> makes the density follow the run.
     /// </param>
+    /// <param name="noiseLevelPerBin">
+    /// Absolute noise amplitude at each bin centre, replacing <paramref name="noiseLevelAtReferenceMz"/>
+    /// times the Jurkat m/z shape. <see cref="ScanNoiseConditions"/> measures it per scan.
+    /// </param>
     public NoiseFloorModel(
         double noiseLevelAtReferenceMz = JurkatNoiseLevelAtReferenceMz,
         double densityScale = 1.0,
         SignalToNoiseDistribution? signalToNoise = null,
         double levelDispersion = JurkatLevelDispersion,
-        double[]? peaksPerScanPerBin = null)
+        double[]? peaksPerScanPerBin = null,
+        double[]? noiseLevelPerBin = null)
     {
+        if (noiseLevelPerBin is not null)
+        {
+            if (noiseLevelPerBin.Length != BinCount)
+                throw new ArgumentException($"A level table needs {BinCount} bins.", nameof(noiseLevelPerBin));
+            foreach (double l in noiseLevelPerBin)
+                if (!(l > 0) || !double.IsFinite(l))
+                    throw new ArgumentOutOfRangeException(nameof(noiseLevelPerBin), l, "Bin levels must be finite and positive.");
+            _levelPerBin = (double[])noiseLevelPerBin.Clone();
+        }
+
         if (peaksPerScanPerBin is not null)
         {
             if (peaksPerScanPerBin.Length != BinCount)
@@ -141,7 +170,7 @@ public sealed class NoiseFloorModel
         NoiseLevelAtReferenceMz = noiseLevelAtReferenceMz;
         DensityScale = densityScale;
         LevelDispersion = levelDispersion;
-        SignalToNoise = signalToNoise ?? SignalToNoiseDistribution.Orbitrap;
+        SignalToNoise = signalToNoise ?? SignalToNoiseDistribution.OrbitrapCentroids;
 
         _binCentres = new double[_peaksPerBin.Length];
         for (int i = 0; i < _binCentres.Length; i++)
@@ -189,6 +218,31 @@ public sealed class NoiseFloorModel
     public NoiseFloorModel With(double noiseLevelAtReferenceMz, double[]? peaksPerScanPerBin = null) =>
         new(noiseLevelAtReferenceMz, DensityScale, SignalToNoise, LevelDispersion, peaksPerScanPerBin ?? _peaksPerBin);
 
+    /// <summary>
+    /// A copy with an absolute level per bin (and optionally a density table) in place of the
+    /// reference amplitude times the Jurkat m/z shape.
+    /// </summary>
+    public NoiseFloorModel WithLevels(double[] noiseLevelPerBin, double[]? peaksPerScanPerBin = null) =>
+        new(noiseLevelPerBin[0], DensityScale, SignalToNoise, LevelDispersion, peaksPerScanPerBin ?? _peaksPerBin, noiseLevelPerBin);
+
+    /// <summary>
+    /// The median of a reported noise peak's intensity over the local level: the median of S/N times
+    /// the lognormal level spread. A measured median intensity divided by this is the level.
+    /// </summary>
+    public double MedianIntensityOverLevel
+    {
+        get
+        {
+            // Deterministic sampling: the product has no closed-form median.
+            var rng = new Random(12345);
+            var v = new double[20001];
+            for (int i = 0; i < v.Length; i++)
+                v[i] = SignalToNoise.Sample(rng) * (LevelDispersion > 0 ? Math.Exp(LevelDispersion * SampleStandardNormal(rng)) : 1);
+            Array.Sort(v);
+            return v[v.Length / 2];
+        }
+    }
+
     /// <summary>Expected number of noise peaks in one scan, over the whole calibrated range.</summary>
     public double ExpectedPeaksPerScan
     {
@@ -207,8 +261,24 @@ public sealed class NoiseFloorModel
     /// it is also the natural detection threshold for signal peaks — see <see cref="NoiseRelativeFloor"/>
     /// and <see cref="Simulation.ScanReductionOptions.Floor"/>.
     /// </summary>
+    /// <summary>
+    /// The lowest noise level over [<paramref name="minMz"/>, <paramref name="maxMz"/>]. The level is
+    /// piecewise linear between bin centres, so its minimum is at an end or at a centre in between.
+    /// </summary>
+    public double MinLevelOver(double minMz, double maxMz)
+    {
+        double min = Math.Min(NoiseLevelAt(minMz), NoiseLevelAt(maxMz));
+        foreach (double centre in _binCentres)
+            if (centre > minMz && centre < maxMz)
+                min = Math.Min(min, NoiseLevelAt(centre));
+        return min;
+    }
+
     public double NoiseLevelAt(double mz)
     {
+        if (_levelPerBin is not null)
+            return Interpolate(_binCentres, _levelPerBin, mz);
+
         double relative = Interpolate(_binCentres, RelativeNoiseLevelPerBin, mz);
         return NoiseLevelAtReferenceMz * relative;
     }

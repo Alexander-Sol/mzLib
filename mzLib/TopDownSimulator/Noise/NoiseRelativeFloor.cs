@@ -40,12 +40,10 @@ public sealed class NoiseRelativeFloor : IIntensityFloor
     public double At(double mz) => SnThreshold * _model.NoiseLevelAt(mz);
 
     /// <summary>
-    /// The noise level is not monotonic in m/z — it rises to a maximum near m/z 1450 and falls away
-    /// again — but it is unimodal, and the minimum of a unimodal function over an interval is always
-    /// at an endpoint. If the calibration table is ever replaced by one that rises and falls more
-    /// than once, this has to scan the knots instead.
+    /// The lowest floor over the range. The level is piecewise linear between bin centres and, once
+    /// measured per scan, need not be unimodal, so the knots inside the range are checked too.
     /// </summary>
-    public double MinOver(double minMz, double maxMz) => Math.Min(At(minMz), At(maxMz));
+    public double MinOver(double minMz, double maxMz) => SnThreshold * _model.MinLevelOver(minMz, maxMz);
 
     public override string ToString() => $"NoiseRelative(S/N>{SnThreshold:R})";
 }

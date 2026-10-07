@@ -749,7 +749,7 @@ namespace Test.FileReadingTests
 
             var totalSw = Stopwatch.StartNew();
 
-            var reader = MsDataFileReader.GetDataFile(rawPath);
+            var reader = MsDataFileReader.GetDataFile(ReadableCopy(rawPath));
             reader.LoadAllStaticData();
             var allMs1Scans = reader.GetAllScansList()
                 .Where(s => s.MsnOrder == 1)
@@ -1570,6 +1570,25 @@ namespace Test.FileReadingTests
             return $"{psm.FileNameWithoutExtension}:{psm.Ms2ScanNumber}";
         }
 
+
+        /// <summary>
+        /// <paramref name="rawPath"/>, or a copy of it in MZLIB_TOPDOWN_SIM_RAW_COPY_DIR when another
+        /// process (a viewer) holds the original. Outputs are still written next to the original.
+        /// </summary>
+        private static string ReadableCopy(string rawPath)
+        {
+            try
+            {
+                using var stream = File.Open(rawPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                return rawPath;
+            }
+            catch (IOException)
+            {
+                string? dir = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_RAW_COPY_DIR");
+                string copy = dir is null ? rawPath : Path.Combine(dir, Path.GetFileName(rawPath));
+                return File.Exists(copy) ? copy : rawPath;
+            }
+        }
 
         private static string ResolveLocalPath(string preferredPath)
         {

@@ -53,12 +53,22 @@ public static class ScanNoiseConditions
     /// A scan without a usable injection time keeps the template's amplitude, and its density is
     /// measured against that.
     /// </remarks>
+    /// <param name="conditionAmplitude">
+    /// Also take the amplitude in each 100-Th bin from the source scan: the median of its peaks below
+    /// S/N 10 there, over <see cref="NoiseFloorModel.MedianIntensityOverLevel"/>. Injection time alone
+    /// gets it wrong by a factor that depends on the regime and the m/z (rep2 fract7: 0.4–1.2× in the
+    /// quiet scans before elution, 1.2–3.5× in the busy region, 1.8–3.3× in the wash, all at the same
+    /// or similar injection time), and simulated noise came out up to 9× too bright at high m/z.
+    /// Bins with fewer than <see cref="MinimumPeaksForLevel"/> such peaks keep the injection-time
+    /// level, scaled by the median correction of the bins that had enough.
+    /// </param>
     public static NoiseFloorModel[] FromSourceScans(
         IReadOnlyList<MsDataScan> sourceScans,
         NoiseFloorModel template,
         double noiseTimesInjectionTime = NoiseFloorModel.JurkatNoiseTimesInjectionTime,
         bool conditionDensity = true,
-        double maxSignalToNoise = DefaultMaxSignalToNoise)
+        double maxSignalToNoise = DefaultMaxSignalToNoise,
+        bool conditionAmplitude = true)
     {
         if (sourceScans is null) throw new ArgumentNullException(nameof(sourceScans));
         if (template is null) throw new ArgumentNullException(nameof(template));
@@ -68,6 +78,7 @@ public static class ScanNoiseConditions
         if (!(maxSignalToNoise > 0))
             throw new ArgumentOutOfRangeException(nameof(maxSignalToNoise), maxSignalToNoise, "Must be positive.");
 
+        double medianOverLevel = template.MedianIntensityOverLevel;
         var models = new NoiseFloorModel[sourceScans.Count];
         for (int s = 0; s < models.Length; s++)
         {
@@ -77,13 +88,80 @@ public static class ScanNoiseConditions
                 ? noiseTimesInjectionTime / it.Value
                 : template.NoiseLevelAtReferenceMz;
 
-            var levelOnly = template.With(level);
-            models[s] = conditionDensity
-                ? levelOnly.With(level, MeasureDensity(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray, levelOnly, maxSignalToNoise))
-                : levelOnly;
+            var itModel = template.With(level);
+            var model = itModel;
+            double[]? levels = null;
+            var mz = scan.MassSpectrum.XArray;
+            var y = scan.MassSpectrum.YArray;
+            if (conditionAmplitude)
+            {
+                // Twice: the second pass classifies peaks against the level the first one measured.
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    var measured = MeasureLevels(mz, y, model, maxSignalToNoise, medianOverLevel, itModel);
+                    if (measured is null) break;
+                    levels = measured;
+                    model = template.WithLevels(levels);
+                }
+            }
+
+            if (conditionDensity)
+            {
+                var density = MeasureDensity(mz, y, model, maxSignalToNoise);
+                model = levels is null ? model.With(level, density) : model.WithLevels(levels, density);
+            }
+
+            models[s] = model;
         }
 
         return models;
+    }
+
+    /// <summary>Bins need this many peaks below the S/N cut for their median to set the level.</summary>
+    public const int MinimumPeaksForLevel = 20;
+
+    /// <summary>
+    /// The noise level in each 100-Th bin implied by the median of the peaks below
+    /// <paramref name="maxSignalToNoise"/> times <paramref name="classifier"/>'s level, or null when no
+    /// bin has <see cref="MinimumPeaksForLevel"/> of them.
+    /// </summary>
+    /// <param name="injectionTimeModel">The amplitude bins without enough peaks fall back on, scaled.</param>
+    public static double[]? MeasureLevels(
+        double[] mz, double[] intensity, NoiseFloorModel classifier, double maxSignalToNoise,
+        double medianOverLevel, NoiseFloorModel injectionTimeModel)
+    {
+        int bins = NoiseFloorModel.BinCount;
+        double first = NoiseFloorModel.BinStart(0);
+        double width = NoiseFloorModel.BinStart(1) - first;
+        var perBin = new List<double>[bins];
+        for (int b = 0; b < bins; b++) perBin[b] = new List<double>();
+        for (int i = 0; i < mz.Length; i++)
+        {
+            int bin = (int)Math.Floor((mz[i] - first) / width);
+            if (bin < 0 || bin >= bins) continue;
+            if (intensity[i] < maxSignalToNoise * classifier.NoiseLevelAt(mz[i]))
+                perBin[bin].Add(intensity[i]);
+        }
+
+        var levels = new double[bins];
+        var corrections = new List<double>();
+        var measured = new bool[bins];
+        for (int b = 0; b < bins; b++)
+        {
+            if (perBin[b].Count < MinimumPeaksForLevel) continue;
+            perBin[b].Sort();
+            levels[b] = perBin[b][perBin[b].Count / 2] / medianOverLevel;
+            measured[b] = levels[b] > 0;
+            if (measured[b]) corrections.Add(levels[b] / injectionTimeModel.NoiseLevelAt(first + (b + 0.5) * width));
+        }
+
+        if (corrections.Count == 0) return null;
+        corrections.Sort();
+        double correction = corrections[corrections.Count / 2];
+        for (int b = 0; b < bins; b++)
+            if (!measured[b])
+                levels[b] = correction * injectionTimeModel.NoiseLevelAt(first + (b + 0.5) * width);
+        return levels;
     }
 
     /// <summary>

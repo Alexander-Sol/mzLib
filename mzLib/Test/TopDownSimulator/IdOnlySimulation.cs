@@ -97,10 +97,13 @@ public class IdOnlySimulation
     /// </summary>
     private static string RawPath(string stem)
     {
-        foreach (string candidate in new[] { $@"{Dir}\{stem}.raw", $@"{Dir}\Rep2_Raw\{stem}.raw" })
+        // MZLIB_TOPDOWN_SIM_RAW_COPY_DIR: a directory holding copies, for when a viewer holds the originals.
+        string? copies = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_RAW_COPY_DIR");
+        foreach (string candidate in new[] { $@"{Dir}\{stem}.raw", $@"{Dir}\Rep2_Raw\{stem}.raw", $@"{copies}\{stem}.raw" })
         {
             try
             {
+                // The Thermo reader opens with FileShare.Read, so probe the same way.
                 using var stream = File.Open(candidate, FileMode.Open, FileAccess.Read, FileShare.Read);
                 return candidate;
             }
@@ -549,6 +552,65 @@ public class IdOnlySimulation
 
         Console.WriteLine($"wrote {export.MzmlPath}: {export.ScanCount} scans, {export.PeakCount / (double)export.ScanCount:F0} peaks/scan, " +
                           $"{export.FeatureCount} features, total {sw.Elapsed}");
+    }
+
+    /// <summary>
+    /// Whether the simulated noise is too bright or too plentiful: per RT regime and m/z band, the
+    /// median over every 5th real scan (and the nearest scan of each simulation) of the peak count and
+    /// the 10th, 50th, 90th and 99th intensity percentiles, as simulated over real.
+    /// </summary>
+    [Test]
+    [Explicit("Compares peak counts and intensity quantiles, real against simulated, by RT regime and m/z band")]
+    public static void CompareNoiseIntensities()
+    {
+        var real = ReadMs1(RawPath(TestStem));
+        var simulations = new List<(string Label, MsDataScan[] Scans)> { ("fitted", ReadMs1(FittedMzml(TestStem))) };
+        foreach (string template in new[] { "train", "notemplate" })
+            if (File.Exists(IdOnlyMzml(template, Charge)))
+                simulations.Add(($"ids, {template}", ReadMs1(IdOnlyMzml(template, Charge))));
+
+        var regimes = new (string Name, double From, double To)[]
+        {
+            ("pre-elution 0-10", 0, 10), ("early 20-28", 20, 28), ("busy 35-45", 35, 45), ("wash 55-70", 55, 70),
+        };
+        var bands = new (double Lo, double Hi)[] { (600, 800), (800, 1200), (1200, 2000) };
+
+        static double Quantile(List<double> sorted, double q) =>
+            sorted.Count == 0 ? double.NaN : sorted[(int)Math.Min(sorted.Count - 1, Math.Floor(q * sorted.Count))];
+
+        static (double Count, double[] Q) Describe(MsDataScan s, double lo, double hi)
+        {
+            var v = new List<double>();
+            var mz = s.MassSpectrum.XArray;
+            var y = s.MassSpectrum.YArray;
+            for (int i = 0; i < mz.Length; i++)
+                if (mz[i] >= lo && mz[i] < hi) v.Add(y[i]);
+            v.Sort();
+            return (v.Count, new[] { Quantile(v, 0.1), Quantile(v, 0.5), Quantile(v, 0.9), Quantile(v, 0.99) });
+        }
+
+        Console.WriteLine("Median over scans of sim/real (count, intensity p10 / p50 / p90 / p99); real absolute values in brackets.");
+        foreach (var (name, from, to) in regimes)
+        {
+            var scans = real.Where(s => s.RetentionTime >= from && s.RetentionTime < to).Where((_, i) => i % 5 == 0).ToArray();
+            Console.WriteLine($"{name} ({scans.Length} scans, median real IT {Median(scans.Select(s => s.InjectionTime ?? double.NaN)):F1} ms)");
+            foreach (var (lo, hi) in bands)
+            {
+                var realStats = scans.Select(s => Describe(s, lo, hi)).ToArray();
+                Console.WriteLine($"  m/z {lo}-{hi}: real count {Median(realStats.Select(r => r.Count)):F0}, intensity " +
+                                  string.Join(" / ", Enumerable.Range(0, 4).Select(k => Median(realStats.Select(r => r.Q[k])).ToString("G3"))));
+                foreach (var (label, simScans) in simulations)
+                {
+                    var ratios = scans.Select((s, i) =>
+                    {
+                        var sim = Describe(Nearest(simScans, s.RetentionTime), lo, hi);
+                        return (Count: sim.Count / Math.Max(1, realStats[i].Count), Q: sim.Q.Select((q, k) => q / realStats[i].Q[k]).ToArray());
+                    }).ToArray();
+                    Console.WriteLine($"    {label,-16} count {Median(ratios.Select(r => r.Count)),5:F2}x   intensity " +
+                                      string.Join(" / ", Enumerable.Range(0, 4).Select(k => Median(ratios.Select(r => r.Q[k])).ToString("F2") + "x")));
+                }
+            }
+        }
     }
 
     /// <summary>

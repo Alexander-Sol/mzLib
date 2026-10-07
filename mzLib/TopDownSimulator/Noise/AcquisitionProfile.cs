@@ -96,7 +96,8 @@ public sealed record AcquisitionProfile(
     AutomaticGainControl Agc,
     double NoiseTimesInjectionTime,
     string Source,
-    double DimLoadRatio = 0)
+    double DimLoadRatio = 0,
+    double[][]? LevelCorrection = null)
 {
     /// <summary>Learns the profile from one run's MS1 scans.</summary>
     public static AcquisitionProfile Learn(
@@ -113,6 +114,14 @@ public sealed record AcquisitionProfile(
 
         var interval = new double[bins];
         var density = new double[bins][];
+        var correction = new double[bins][];
+        double ItLevel(int i, int band)
+        {
+            // As ScanNoiseConditions does: the injection-time amplitude, or the default without one.
+            double? it = scans[i].InjectionTime;
+            double level = it is > 0 && double.IsFinite(it.Value) ? noiseTimesInjectionTime / it.Value : NoiseFloorModel.JurkatNoiseLevelAtReferenceMz;
+            return new NoiseFloorModel(level).NoiseLevelAt(NoiseFloorModel.BinStart(band) + 50);
+        }
         for (int b = 0; b < bins; b++)
         {
             double lo = start + b * binWidth, hi = lo + binWidth;
@@ -121,6 +130,10 @@ public sealed record AcquisitionProfile(
             interval[b] = gaps.Length > 0 ? AutomaticGainControl.Median(gaps) : double.NaN;
             density[b] = idx.Length > 0
                 ? Enumerable.Range(0, NoiseFloorModel.BinCount).Select(m => AutomaticGainControl.Median(idx.Select(i => noise[i].PeaksPerScanInBin(m)))).ToArray()
+                : null!;
+            correction[b] = idx.Length > 0
+                ? Enumerable.Range(0, NoiseFloorModel.BinCount).Select(m => AutomaticGainControl.Median(
+                    idx.Select(i => noise[i].NoiseLevelAt(NoiseFloorModel.BinStart(m) + 50) / ItLevel(i, m)))).ToArray()
                 : null!;
         }
 
@@ -133,6 +146,7 @@ public sealed record AcquisitionProfile(
                     .OrderBy(o => Math.Abs(o - b)).First();
                 if (double.IsNaN(interval[b])) interval[b] = interval[near];
                 density[b] ??= density[near];
+                correction[b] ??= correction[near];
             }
         }
 
@@ -159,7 +173,7 @@ public sealed record AcquisitionProfile(
         double dimLoadRatio = ratios.Count > 0 ? AutomaticGainControl.Median(ratios) : 0;
 
         return new AcquisitionProfile(binWidth, start, interval, density, first, last,
-            agc, noiseTimesInjectionTime, source, dimLoadRatio);
+            agc, noiseTimesInjectionTime, source, dimLoadRatio, correction);
     }
 
     private int BinOf(double rt) => Math.Clamp((int)Math.Floor((rt - FirstBinStart) / BinWidth), 0, Ms1Interval.Length - 1);
@@ -191,7 +205,19 @@ public sealed record AcquisitionProfile(
         for (int s = 0; s < models.Length; s++)
         {
             double it = Agc.InjectionTime((1 + DimLoadRatio) * signalScans[s].MassSpectrum.SumOfAllY);
-            models[s] = template.With(NoiseTimesInjectionTime / it, DensityAt(signalScans[s].RetentionTime));
+            double rt = signalScans[s].RetentionTime;
+            var itModel = template.With(NoiseTimesInjectionTime / it, DensityAt(rt));
+            if (LevelCorrection is null)
+            {
+                models[s] = itModel;
+                continue;
+            }
+
+            var factors = LevelCorrection[BinOf(rt)];
+            var levels = new double[NoiseFloorModel.BinCount];
+            for (int b = 0; b < levels.Length; b++)
+                levels[b] = itModel.NoiseLevelAt(NoiseFloorModel.BinStart(b) + 50) * factors[b];
+            models[s] = itModel.WithLevels(levels);
         }
 
         return models;
