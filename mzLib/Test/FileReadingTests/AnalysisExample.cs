@@ -705,6 +705,20 @@ namespace Test.FileReadingTests
                 @"D:\JurkatTopdown\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\02-18-20_jurkat_td_rep1_fract7_Proteoforms.psmtsv",
                 rtStart: null, rtEnd: null, label: "full", writeClean: false);
 
+        /// <summary>
+        /// Full-run fitted exports for rep2 fract5 and fract6, identified by the MM114_Search_50_50
+        /// search (Classic deconvolution, no GPTMD). They are the upper bounds for the cross-fraction
+        /// ID-only test in <c>IdOnlySimulation</c>.
+        /// </summary>
+        [TestCase("fract5")]
+        [TestCase("fract6")]
+        [Explicit("Writes a full-run noisy simulated mzML for rep2 fract5 or fract6, fitted to its own raw file")]
+        public static void ExportRep2OtherFractionFullNoisySimulation(string fraction) =>
+            ExportNoisySimulation(
+                $@"D:\JurkatTopdown\Rep2_Raw\02-18-20_jurkat_td_rep2_{fraction}.raw",
+                $@"D:\JurkatTopdown\Rep2_Raw\MM114_Search_50_50\Task1-SearchTask\Individual File Results\02-18-20_jurkat_td_rep2_{fraction}_Proteoforms.psmtsv",
+                rtStart: null, rtEnd: null, label: "full", writeClean: false);
+
         private static void ExportRep2NoisySimulation(double? rtStart, double? rtEnd, string label, bool writeClean) =>
             ExportNoisySimulation(
                 @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.raw",

@@ -259,9 +259,47 @@ under S/N 10, and nothing constrains the tail above it. Both point at step 4's u
 component. The median centroid intensity is not a usable noise level: the instrument reports only
 local maxima above its own threshold, so S/N 10 against that median kept 4 peaks per busy scan.
 
+## Across fractions: rep2 fract6 and fract5
+
+Set `MZLIB_TOPDOWN_SIM_IDONLY_HELDOUT=rep2-fract6` (or `rep2-fract5`) and `FIT_TAG=.v3`, then run
+`SimulateHeldOutFromIdsOnly` with both templates and `CompareHeldOut`. The setup:
+
+- **Priors:** still the rep2 fract7 `.v3` ones.
+- **`train` template:** rep2 fract7, so both the sample and its noise differ from the run being
+  simulated.
+- **Identifications:** from `Rep2_Raw\MM114_Search_50_50`. It is the MM114 search closest to the
+  fract7 GPTMD search: on fract7 it finds 910 against 1080 IDs, and 81 % of its identified scans are
+  also identified by the GPTMD search. But it uses Classic deconvolution, 50 ppm tolerances and no
+  GPTMD, so the precursor intensities that abundance is predicted from come from a different
+  deconvolution.
+- **Upper bounds:** `AnalysisExample.ExportRep2OtherFractionFullNoisySimulation("fract5"|"fract6")`
+  with `OUTPUT_TAG=.v3`. They fitted 534/538 and 477 species; unexplained energy after the refit is
+  0.21 and 0.27.
+
+| | fract6 | fract5 | rep1 fract7 |
+|---|---|---|---|
+| μ_z error, residue weights | 0.55 | 0.50 | 0.84 |
+| RT μ error (min) | 0.051 | 0.049 | 0.066 |
+| log₁₀ abundance error, median (mean \|err\|) | −0.15 (0.36) | −0.14 (0.35) | −0.10 (0.34) |
+| Envelope cos, fitted / IDs `self` / IDs `train` | 0.885 / 0.835 / 0.863 | 0.886 / 0.832 / 0.861 | 0.882 / 0.824 / 0.825 |
+| Apex charge within 1, fitted / IDs `train` | 64 % / 63 % | 78 % / 75 % | 78 % / 66 % |
+| Whole-run TIC ratio, IDs `self` / `train` | 0.99 / **0.45** | 0.99 / **0.44** | 0.98 / 0.98 |
+| Peaks/scan r, IDs `self` / `train` | 1.000 / 0.968 | 0.999 / 0.950 | 0.999 / 0.990 |
+| S/N ≥ 10 peak count ratio (30–50 min), IDs `self` / `train` | 1.13 / **0.26** | 1.11 / **0.31** | 1.32 / 1.21 |
+
+**The signal model transfers; the template does not.**
+
+- **Per species,** the ID-only envelopes of another fraction score as well as those of rep1 fract7.
+  The charge centre and the elution apex are predicted better. Abundance comes out 0.14 dex low at
+  the median, consistent with Classic deconvolution reporting different precursor intensities from
+  IsoDec.
+- **Whole run,** the fract7 template under-delivers the ion load badly: TIC 0.45×, and over 30–50 min
+  only 0.15–0.23× the TIC and a quarter of the bright peaks.
+- **The `self` template only looks right.** It hides the problem: its "noise" density counts every
+  peak below S/N 10 in each real scan, unidentified analytes included, so it carries the sample's
+  unidentified load. A template from another fraction carries the wrong load.
+- **Conclusion:** step 4 is necessary, not optional.
+
 ## Next
 
-1. A held-out test across fractions (e.g. rep2 fract5 or fract6 IDs with a fract7 template), to test
-   how far the template transfers. The MM114 searches under `Rep2_Raw` have fract5 and fract6
-   identifications.
-2. An unidentified-analyte component and an AGC model in place of the template (step 4 of the plan).
+1. An unidentified-analyte component and an AGC model in place of the template (step 4 of the plan).

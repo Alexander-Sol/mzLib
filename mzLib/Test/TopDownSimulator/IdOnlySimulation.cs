@@ -40,11 +40,40 @@ public class IdOnlySimulation
 {
     private const string Dir = @"D:\JurkatTopdown";
     private const string TrainStem = "02-18-20_jurkat_td_rep2_fract7";
-    private const string TestStem = "02-18-20_jurkat_td_rep1_fract7";
     private const double QValue = 0.01;
 
+    /// <summary>A run to simulate from its identifications, and where its raw file and fitted exports live.</summary>
+    private sealed record HeldOutRun(string Stem, string Directory, string PsmPath);
+
+    /// <summary>
+    /// The held-out run: rep1 fract7 (default; same fraction, GPTMD search) or, with
+    /// MZLIB_TOPDOWN_SIM_IDONLY_HELDOUT=rep2-fract6 or rep2-fract5, another fraction of the training
+    /// replicate, identified by MM114_Search_50_50 (Classic deconvolution, no GPTMD). Their fitted
+    /// upper bounds come from <c>AnalysisExample.ExportRep2OtherFractionFullNoisySimulation</c>.
+    /// </summary>
+    private static HeldOutRun HeldOut =>
+        Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_IDONLY_HELDOUT")?.Trim().ToLowerInvariant() switch
+        {
+            "rep2-fract6" => OtherFraction("fract6"),
+            "rep2-fract5" => OtherFraction("fract5"),
+            _ => new HeldOutRun("02-18-20_jurkat_td_rep1_fract7", Dir, PsmPath("02-18-20_jurkat_td_rep1_fract7")),
+        };
+
+    private static HeldOutRun OtherFraction(string fraction)
+    {
+        string stem = $"02-18-20_jurkat_td_rep2_{fraction}";
+        return new HeldOutRun(stem, $@"{Dir}\Rep2_Raw",
+            $@"{Dir}\Rep2_Raw\MM114_Search_50_50\Task1-SearchTask\Individual File Results\{stem}_Proteoforms.psmtsv");
+    }
+
+    private static string TestStem => HeldOut.Stem;
+
     private static string PsmPath(string stem) =>
-        $@"{Dir}\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\{stem}_Proteoforms.psmtsv";
+        stem == TrainStem || stem == "02-18-20_jurkat_td_rep1_fract7"
+            ? $@"{Dir}\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\{stem}_Proteoforms.psmtsv"
+            : HeldOut.PsmPath;
+
+    private static string RunDir(string stem) => stem == TrainStem ? Dir : HeldOut.Directory;
 
     /// <summary>
     /// The first copy of the raw file that can be opened. The top-level copies are sometimes held
@@ -75,11 +104,11 @@ public class IdOnlySimulation
         Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_FIT_TAG")?.Trim() is { Length: > 0 } tag ? tag : ".v2";
 
     private static string DerivedTag => FitTag == ".v2" ? "" : FitTag;
-    private static string FittedSidecar(string stem) => $@"{Dir}\{stem}.full{FitTag}.noisy.simulated.groundtruth.tsv";
-    private static string FittedMzml(string stem) => $@"{Dir}\{stem}.full{FitTag}.noisy.simulated.mzML";
+    private static string FittedSidecar(string stem) => $@"{RunDir(stem)}\{stem}.full{FitTag}.noisy.simulated.groundtruth.tsv";
+    private static string FittedMzml(string stem) => $@"{RunDir(stem)}\{stem}.full{FitTag}.noisy.simulated.mzML";
     private static string PriorsPath => $@"{Dir}\idonly-priors.{TrainStem}{DerivedTag}.json";
     private static string IdOnlyMzml(string template, ChargePredictor charge) =>
-        $@"{Dir}\{TestStem}.idonly-{template}{ChargeSuffix(charge)}{DerivedTag}.noisy.simulated.mzML";
+        $@"{HeldOut.Directory}\{TestStem}.idonly-{template}{ChargeSuffix(charge)}{DerivedTag}.noisy.simulated.mzML";
 
     private static string ChargeSuffix(ChargePredictor charge) => charge switch
     {
