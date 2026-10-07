@@ -173,6 +173,7 @@ public sealed class GlobalAbundanceRefitter
         var kernels = models.Select(m => new IsotopeEnvelopeKernel(m.MonoisotopicMass)).ToArray();
 
         var sampleSets = BuildSampleSets(models, truths, kernels, minCharge, maxCharge, widthModel);
+        var index = new ModelMzIndex(models, kernels, minCharge, maxCharge, widthModel);
         var sampleSetOffsets = BuildSampleSetOffsets(sampleSets);
 
         // The basis value of model m at sample k depends only on shape terms — mass, RT profile,
@@ -182,7 +183,7 @@ public sealed class GlobalAbundanceRefitter
         // uncached path would recompute, so caching alone does not change results.
         var basisMatrices = TryBuildBasisMatrices(
             models, kernels, sampleSets, minCharge, maxCharge, widthModel,
-            _options.MaxBasisCacheBytes, _options.BasisSparsityThreshold);
+            _options.MaxBasisCacheBytes, _options.BasisSparsityThreshold, index);
 
         // Model-major view of the same entries. Null only when the basis itself could not be cached,
         // in which case the sweep falls back to recomputing one sample set's totals at a time.
@@ -193,7 +194,7 @@ public sealed class GlobalAbundanceRefitter
             ? null
             : new double[transpose.SampleSetOffsets[sampleSets.Length]];
 
-        var initialPredictedTotals = ComputePredictedTotals(models, kernels, sampleSets, basisMatrices, minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold);
+        var initialPredictedTotals = ComputePredictedTotals(models, kernels, sampleSets, basisMatrices, minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold, index);
         var initialResiduals = ComputeResidualEnergy(sampleSets, Flatten(initialPredictedTotals, sampleSetOffsets), sampleSetOffsets);
         var residualByIteration = new List<double>(_options.MaxIterations);
         int completedIterations = 0;
@@ -224,7 +225,7 @@ public sealed class GlobalAbundanceRefitter
                     // Recomputed immediately before use, which is what makes this branch
                     // Gauss-Seidel too. Over a whole sweep it touches each sample set exactly once,
                     // so it costs no more than the single up-front pass it replaces.
-                    totals = ComputeSampleSetTotals(models, kernels, sampleSets[p], minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold);
+                    totals = ComputeSampleSetTotals(models, kernels, sampleSets[p], minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold, index);
                     totalsOffset = 0;
                 }
 
@@ -251,7 +252,7 @@ public sealed class GlobalAbundanceRefitter
             double[] sweepTotals = transpose is not null
                 ? liveTotals!
                 : Flatten(
-                    ComputePredictedTotals(models, kernels, sampleSets, basisMatrices, minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold),
+                    ComputePredictedTotals(models, kernels, sampleSets, basisMatrices, minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold, index),
                     sampleSetOffsets);
             double sweepResidual = ComputeResidualEnergy(sampleSets, sweepTotals, sampleSetOffsets).UnexplainedFraction;
             residualByIteration.Add(sweepResidual);
@@ -266,7 +267,7 @@ public sealed class GlobalAbundanceRefitter
             }
         }
 
-        var finalPredictedTotals = ComputePredictedTotals(models, kernels, sampleSets, basisMatrices, minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold);
+        var finalPredictedTotals = ComputePredictedTotals(models, kernels, sampleSets, basisMatrices, minCharge, maxCharge, widthModel, _options.BasisSparsityThreshold, index);
         var finalResiduals = ComputeResidualEnergy(sampleSets, Flatten(finalPredictedTotals, sampleSetOffsets), sampleSetOffsets);
         var updatedFits = new FittedProteoform[fitted.Count];
         for (int i = 0; i < fitted.Count; i++)
@@ -500,10 +501,10 @@ public sealed class GlobalAbundanceRefitter
         int maxCharge,
         IPeakWidthModel widthModel,
         long maxBytes,
-        double sparsityThreshold)
+        double sparsityThreshold,
+        ModelMzIndex index)
     {
         const int bytesPerEntry = sizeof(int) + sizeof(double);
-        int modelCount = models.Count;
         long budgetEntries = maxBytes / bytesPerEntry;
         long usedEntries = 0;
 
@@ -527,15 +528,14 @@ public sealed class GlobalAbundanceRefitter
                 double mz = set.Mzs[k];
                 double cutoff = SparsityCutoff(set.Basis[k], sparsityThreshold);
 
-                for (int m = 0; m < modelCount; m++)
+                ForEachContribution(index, models, kernels, time, mz, widthModel, (m, basis) =>
                 {
-                    double basis = EvaluateUnitContribution(models[m], kernels[m], time, mz, minCharge, maxCharge, widthModel);
-                    if (basis <= 0 || basis < cutoff)
-                        continue;
+                    if (basis < cutoff)
+                        return;
 
                     modelIndices.Add(m);
                     values.Add(basis);
-                }
+                });
 
                 if (usedEntries + modelIndices.Count > budgetEntries)
                     return null;
@@ -566,7 +566,8 @@ public sealed class GlobalAbundanceRefitter
         int minCharge,
         int maxCharge,
         IPeakWidthModel widthModel,
-        double sparsityThreshold = 0)
+        double sparsityThreshold,
+        ModelMzIndex index)
     {
         var predicted = new double[sampleSets.Count][];
 
@@ -575,7 +576,7 @@ public sealed class GlobalAbundanceRefitter
             var sparse = basisMatrices?[p];
             predicted[p] = sparse is not null
                 ? ComputeSampleSetTotalsFromSparse(models, sampleSets[p], sparse)
-                : ComputeSampleSetTotals(models, kernels, sampleSets[p], minCharge, maxCharge, widthModel, sparsityThreshold);
+                : ComputeSampleSetTotals(models, kernels, sampleSets[p], minCharge, maxCharge, widthModel, sparsityThreshold, index);
         }
 
         return predicted;
@@ -612,31 +613,154 @@ public sealed class GlobalAbundanceRefitter
         int minCharge,
         int maxCharge,
         IPeakWidthModel widthModel,
-        double sparsityThreshold)
+        double sparsityThreshold,
+        ModelMzIndex index)
     {
-        int modelCount = models.Count;
         var totals = new double[set.Observed.Length];
 
         for (int k = 0; k < totals.Length; k++)
         {
-            double time = set.Times[k];
-            double mz = set.Mzs[k];
             double cutoff = SparsityCutoff(set.Basis[k], sparsityThreshold);
 
             double sum = 0;
-            for (int m = 0; m < modelCount; m++)
+            ForEachContribution(index, models, kernels, set.Times[k], set.Mzs[k], widthModel, (m, basis) =>
             {
-                double basis = EvaluateUnitContribution(models[m], kernels[m], time, mz, minCharge, maxCharge, widthModel);
-                if (basis <= 0 || basis < cutoff)
-                    continue;
-
-                sum += models[m].Abundance * basis;
-            }
+                if (basis >= cutoff)
+                    sum += models[m].Abundance * basis;
+            });
 
             totals[k] = sum;
         }
 
         return totals;
+    }
+
+    /// <summary>
+    /// For an m/z, the (model, charge) pairs whose envelope can put anything there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what makes the basis build scale with how crowded a sample's neighbourhood is
+    /// rather than with the total number of models. Without it every sample evaluates every model
+    /// at every charge, which is quadratic in model count and is why the refit used to be skipped
+    /// above 200 models.
+    /// </para>
+    /// <para>
+    /// The pruning is exact, not approximate. <see cref="IsotopeEnvelopeKernel.Evaluate(double, int, IPeakWidthModel)"/>
+    /// returns exactly 0 further than its evaluation window from the envelope, and the bounds here
+    /// use a wider window, so every pair skipped would have added exactly 0 to the charge sum.
+    /// Candidates come back ordered by model and then charge, the order
+    /// <see cref="EvaluateUnitContribution"/> accumulates in, so sums are bit-identical too.
+    /// </para>
+    /// </remarks>
+    private sealed class ModelMzIndex
+    {
+        private const double BinWidth = 1.0;
+        private const double WindowInSigmas = 8.0;
+
+        private readonly double _firstBin;
+        private readonly (int Model, int Charge, double Lo, double Hi)[][] _bins;
+
+        public ModelMzIndex(
+            IReadOnlyList<ProteoformModel> models,
+            IReadOnlyList<IsotopeEnvelopeKernel> kernels,
+            int minCharge,
+            int maxCharge,
+            IPeakWidthModel widthModel)
+        {
+            var spans = new List<(int Model, int Charge, double Lo, double Hi)>();
+            for (int m = 0; m < models.Count; m++)
+            {
+                for (int z = minCharge; z <= maxCharge; z++)
+                {
+                    if (models[m].ChargeDistribution.Evaluate(z) <= 0)
+                        continue;
+
+                    var (lo, hi) = kernels[m].GetMzBounds(z);
+                    if (!double.IsFinite(lo) || !double.IsFinite(hi))
+                        continue;
+
+                    double pad = WindowInSigmas * widthModel.MaxSigmaOver(lo, hi);
+                    spans.Add((m, z, lo - pad, hi + pad));
+                }
+            }
+
+            if (spans.Count == 0)
+            {
+                _firstBin = 0;
+                _bins = Array.Empty<(int, int, double, double)[]>();
+                return;
+            }
+
+            double min = double.PositiveInfinity, max = double.NegativeInfinity;
+            foreach (var s in spans)
+            {
+                min = Math.Min(min, s.Lo);
+                max = Math.Max(max, s.Hi);
+            }
+
+            _firstBin = Math.Floor(min / BinWidth);
+            int binCount = (int)(Math.Floor(max / BinWidth) - _firstBin) + 1;
+            var lists = new List<(int, int, double, double)>[binCount];
+
+            // Spans were added in (model, charge) order, so every bin's list inherits that order.
+            foreach (var s in spans)
+            {
+                int first = (int)(Math.Floor(s.Lo / BinWidth) - _firstBin);
+                int last = (int)(Math.Floor(s.Hi / BinWidth) - _firstBin);
+                for (int b = first; b <= last; b++)
+                    (lists[b] ??= new List<(int, int, double, double)>()).Add(s);
+            }
+
+            _bins = new (int, int, double, double)[binCount][];
+            for (int b = 0; b < binCount; b++)
+                _bins[b] = lists[b]?.ToArray() ?? Array.Empty<(int, int, double, double)>();
+        }
+
+        /// <summary>Spans in the bin holding <paramref name="mz"/>; callers still test Lo ≤ mz ≤ Hi.</summary>
+        public (int Model, int Charge, double Lo, double Hi)[] Candidates(double mz)
+        {
+            long b = (long)(Math.Floor(mz / BinWidth) - _firstBin);
+            return b >= 0 && b < _bins.Length ? _bins[b] : Array.Empty<(int, int, double, double)>();
+        }
+    }
+
+    /// <summary>
+    /// Every model's unit contribution at one sample, in ascending model order, using
+    /// <paramref name="index"/> to visit only the (model, charge) pairs that can be nonzero there.
+    /// Gives the same values as calling <see cref="EvaluateUnitContribution"/> for every model.
+    /// </summary>
+    private static void ForEachContribution(
+        ModelMzIndex index,
+        IReadOnlyList<ProteoformModel> models,
+        IReadOnlyList<IsotopeEnvelopeKernel> kernels,
+        double time,
+        double mz,
+        IPeakWidthModel widthModel,
+        Action<int, double> visit)
+    {
+        var candidates = index.Candidates(mz);
+        int i = 0;
+        while (i < candidates.Length)
+        {
+            int m = candidates[i].Model;
+            double rt = models[m].RtProfile.Evaluate(time);
+            double chargeSum = 0;
+
+            for (; i < candidates.Length && candidates[i].Model == m; i++)
+            {
+                var c = candidates[i];
+                if (rt <= 0 || mz < c.Lo || mz > c.Hi)
+                    continue;
+
+                double fz = models[m].ChargeDistribution.Evaluate(c.Charge);
+                chargeSum += fz * kernels[m].Evaluate(mz, c.Charge, widthModel);
+            }
+
+            double basis = rt > 0 ? rt * chargeSum : 0;
+            if (basis > 0)
+                visit(m, basis);
+        }
     }
 
     private static double EvaluateUnitContribution(

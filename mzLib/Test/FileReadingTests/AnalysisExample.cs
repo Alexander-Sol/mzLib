@@ -81,7 +81,10 @@ namespace Test.FileReadingTests
 
         private static int GetGlobalAbundanceRefitMaxModels()
         {
-            const int defaultMaxModels = 200;
+            // Was 200 while building the refit basis evaluated every model at every sample. The
+            // basis now visits only models whose envelope reaches each sample, so a full run's
+            // thousand-odd models fit comfortably; the cap is kept as a guard.
+            const int defaultMaxModels = 10000;
             var raw = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_GLOBAL_REFIT_MAX_MODELS");
             if (string.IsNullOrWhiteSpace(raw))
                 return defaultMaxModels;
@@ -447,7 +450,7 @@ namespace Test.FileReadingTests
                 .Take(profile.MaxRecords)
                 .ToArray();
 
-            var simulationRecords = deduplicate ? DeduplicateByProteoform(records) : records;
+            var simulationRecords = deduplicate ? DeduplicateBySpecies(records) : AsSpecies(records);
             Console.WriteLine($"Loaded and filtered {records.Length} MM records in {stageSw.Elapsed}");
             if (simulationRecords.Length != records.Length)
                 Console.WriteLine($"Deduplicated records: {simulationRecords.Length}");
@@ -464,10 +467,8 @@ namespace Test.FileReadingTests
             int globalMaxCharge = int.MinValue;
 
             int counter = 0;
-            foreach (var record in simulationRecords)
+            foreach (var (record, minCharge, maxCharge, _) in simulationRecords)
             {
-                int minCharge = Math.Max(2, record.PrecursorCharge - 2);
-                int maxCharge = Math.Min(80, record.PrecursorCharge + 2);
                 if (minCharge > maxCharge)
                     continue;
 
@@ -589,14 +590,12 @@ namespace Test.FileReadingTests
             Console.WriteLine($"Real slice scans: {rtSliceMs1Scans.Length} " +
                               $"(centroided: {rtSliceMs1Scans.Count(s => s.IsCentroid)}/{rtSliceMs1Scans.Length})");
 
-            var qFilteredRecords = LoadQualifiedMmRecords(resultPath, stem, qValueThreshold, rtStart: null, rtEnd: null);
+            var loadedRecords = LoadQualifiedMmRecords(resultPath, stem, qValueThreshold, rtStart: null, rtEnd: null);
+            var qFilteredRecords = deduplicate ? DeduplicateBySpecies(loadedRecords) : AsSpecies(loadedRecords);
             if (deduplicate)
-            {
-                qFilteredRecords = DeduplicateByProteoform(qFilteredRecords);
-                Console.WriteLine($"Deduplicated q<=0.01 record count: {qFilteredRecords.Length}");
-            }
+                Console.WriteLine($"Deduplicated q<=0.01 records: {loadedRecords.Length} -> {qFilteredRecords.Length} species");
             var qFilteredSliceRecords = qFilteredRecords
-                .Where(r => r.RetentionTime >= rtStart && r.RetentionTime <= rtEnd)
+                .Where(s => s.Record.RetentionTime >= rtStart && s.Record.RetentionTime <= rtEnd)
                 .ToArray();
 
             Assert.That(qFilteredSliceRecords, Is.Not.Empty, "No proteoforms passed q<=0.01 inside 31-35 min.");
@@ -732,7 +731,7 @@ namespace Test.FileReadingTests
 
             // Fitted against the whole run so that proteoforms eluting just before the window still
             // contribute their tails, then simulated only on the window's scan grid.
-            var records = DeduplicateByProteoform(
+            var records = DeduplicateBySpecies(
                 LoadQualifiedMmRecords(resultPath, stem, qValueThreshold, rtStart: null, rtEnd: null));
             Console.WriteLine($"Deduplicated q<={qValueThreshold} records: {records.Length}");
 
@@ -843,7 +842,7 @@ namespace Test.FileReadingTests
             Assert.That(allMs2Scans, Is.Not.Empty, "No MS2 scans were found in the raw file.");
             Console.WriteLine($"Source scans: {allMs1Scans.Length} MS1, {allMs2Scans.Length} MS2");
 
-            var records = DeduplicateByProteoform(
+            var records = DeduplicateBySpecies(
                 LoadQualifiedMmRecords(resultPath, stem, qValueThreshold, rtStart: null, rtEnd: null));
             Console.WriteLine($"Deduplicated q<={qValueThreshold} records: {records.Length}");
 
@@ -1261,22 +1260,23 @@ namespace Test.FileReadingTests
         /// are all independent of how the work happened to be scheduled.
         /// </remarks>
         private static FitBatch FitProteoforms(
-            IReadOnlyList<MmResultRecord> records,
+            IReadOnlyList<Species> species,
             GroundTruthExtractor extractor,
             double rtHalfWidth,
             bool fitPeakWidthModel = true)
         {
-            var fits = new FittedProteoform[records.Count];
-            var truths = new ProteoformGroundTruth[records.Count];
-            var chargeRanges = new (int Min, int Max)[records.Count];
+            var records = species.Select(s => s.Record).ToArray();
+            var fits = new FittedProteoform[species.Count];
+            var truths = new ProteoformGroundTruth[species.Count];
+            var chargeRanges = new (int Min, int Max)[species.Count];
             int completed = 0;
             double minSamplesPerSigma = GetMinimumSamplesPerSigma();
 
-            Parallel.For(0, records.Count, i =>
+            Parallel.For(0, species.Count, i =>
             {
-                var record = records[i];
-                int minCharge = Math.Max(2, record.PrecursorCharge - 2);
-                int maxCharge = Math.Min(80, record.PrecursorCharge + 2);
+                var record = species[i].Record;
+                int minCharge = species[i].MinCharge;
+                int maxCharge = species[i].MaxCharge;
                 if (minCharge > maxCharge)
                     return;
 
@@ -1304,17 +1304,17 @@ namespace Test.FileReadingTests
 
                 int done = Interlocked.Increment(ref completed);
                 if (done % 100 == 0)
-                    Console.WriteLine($"Fitted {done}/{records.Count} records");
+                    Console.WriteLine($"Fitted {done}/{species.Count} records");
             });
 
-            var keptFits = new List<FittedProteoform>(records.Count);
-            var keptTruths = new List<ProteoformGroundTruth>(records.Count);
-            var keptRecords = new List<MmResultRecord>(records.Count);
+            var keptFits = new List<FittedProteoform>(species.Count);
+            var keptTruths = new List<ProteoformGroundTruth>(species.Count);
+            var keptRecords = new List<MmResultRecord>(species.Count);
 
             int minChargeGlobal = int.MaxValue;
             int maxChargeGlobal = int.MinValue;
 
-            for (int i = 0; i < records.Count; i++)
+            for (int i = 0; i < species.Count; i++)
             {
                 if (fits[i] is null)
                     continue;
@@ -1402,20 +1402,80 @@ namespace Test.FileReadingTests
             return refitResult.FittedProteoforms.Select(f => f.Model).ToArray();
         }
 
-        private static MmResultRecord[] DeduplicateByProteoform(IReadOnlyList<MmResultRecord> records)
-        {
-            return records
-                .GroupBy(r => (
-                    Accession: string.IsNullOrWhiteSpace(r.Accession) ? string.Empty : r.Accession,
-                    Sequence: r.FullSequence,
-                    Charge: r.PrecursorCharge))
-                .Select(g => g
-                    .OrderByDescending(r => r.Score)
-                    .ThenBy(r => r.RetentionTime)
-                    .First())
-                .OrderByDescending(r => r.Score)
-                .ThenBy(r => r.RetentionTime)
+        /// <summary>
+        /// One simulated species: the record whose mass and retention time it is fitted at, and the
+        /// charge range its envelope is extracted over.
+        /// </summary>
+        private sealed record Species(MmResultRecord Record, int MinCharge, int MaxCharge, int MemberCount = 1);
+
+        /// <summary>Isotopologue spacing of averagine, in daltons.</summary>
+        private const double AveragineIsotopeSpacing = 1.00235;
+
+        /// <summary>
+        /// Each record as its own species, extracted over its precursor charge ± 2. What the
+        /// pipeline did before species-level deduplication, kept for MZLIB_TOPDOWN_SIM_NO_DEDUP.
+        /// </summary>
+        private static Species[] AsSpecies(IEnumerable<MmResultRecord> records) =>
+            records
+                .Select(r => new Species(r, Math.Max(2, r.PrecursorCharge - 2), Math.Min(80, r.PrecursorCharge + 2)))
                 .ToArray();
+
+        /// <summary>
+        /// Groups records that describe the same MS1 signal into one species, so it is fitted once.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two records are one species when they elute within <paramref name="rtTolerance"/> minutes
+        /// and their masses differ by a whole number of isotopologue spacings (0 to ±3) within
+        /// <paramref name="massTolerance"/> Da. That covers:
+        /// </para>
+        /// <list type="bullet">
+        /// <item>the same proteoform identified at several precursor charges;</item>
+        /// <item>identical sequences under different accessions;</item>
+        /// <item>isobaric localization variants;</item>
+        /// <item>off-by-one-dalton monoisotopic assignments;</item>
+        /// <item>near-isobaric pairs such as deamidation (+0.984 Da), which top-down MS1 cannot
+        /// separate from a +1 isotopologue shift.</item>
+        /// </list>
+        /// <para>
+        /// Fitted separately, each of those claims the whole observed envelope; at H2B in rep2
+        /// fract7, seven such models each predicted the full height of the same peak. Grouping is
+        /// greedy in descending score, so the best-scoring record anchors each species. Its
+        /// envelope is extracted over every member's precursor charge ± 2.
+        /// </para>
+        /// </remarks>
+        private static Species[] DeduplicateBySpecies(
+            IReadOnlyList<MmResultRecord> records,
+            double rtTolerance = 0.5,
+            double massTolerance = 0.03)
+        {
+            var anchors = new List<(MmResultRecord Record, int MinCharge, int MaxCharge, int Count)>();
+            foreach (var record in records.OrderByDescending(r => r.Score).ThenBy(r => r.RetentionTime))
+            {
+                int match = anchors.FindIndex(a =>
+                    Math.Abs(a.Record.RetentionTime - record.RetentionTime) <= rtTolerance
+                    && WithinIsotopeSpacings(a.Record.MonoisotopicMass, record.MonoisotopicMass, massTolerance));
+
+                int lo = Math.Max(2, record.PrecursorCharge - 2);
+                int hi = Math.Min(80, record.PrecursorCharge + 2);
+                if (match < 0)
+                {
+                    anchors.Add((record, lo, hi, 1));
+                    continue;
+                }
+
+                var a = anchors[match];
+                anchors[match] = (a.Record, Math.Min(a.MinCharge, lo), Math.Max(a.MaxCharge, hi), a.Count + 1);
+            }
+
+            return anchors.Select(a => new Species(a.Record, a.MinCharge, a.MaxCharge, a.Count)).ToArray();
+        }
+
+        private static bool WithinIsotopeSpacings(double a, double b, double tolerance)
+        {
+            double delta = b - a;
+            int n = (int)Math.Round(delta / AveragineIsotopeSpacing);
+            return Math.Abs(n) <= 3 && Math.Abs(delta - n * AveragineIsotopeSpacing) <= tolerance;
         }
 
         private static string BuildIdentifier(PsmFromTsv psm)
