@@ -14,6 +14,16 @@ namespace TopDownSimulator.Prediction;
 /// </summary>
 public sealed record ShapeSample(double RtSigma, double RtTau, double ChargeSigma);
 
+/// <summary>Where <see cref="IdOnlyPriors.Predict"/> takes the charge-distribution centre from.</summary>
+public enum ChargePredictor
+{
+    /// <summary>Mean precursor charge of the species' identifications, plus K+R. R² 0.946 on rep2 fract7.</summary>
+    ObservedCharges,
+
+    /// <summary>√mass and net basic residues only, for identifications without charges. R² 0.62.</summary>
+    SequenceOnly,
+}
+
 /// <summary>
 /// Everything needed to turn identifications into <see cref="ProteoformModel"/>s without the raw
 /// data they came from, learned from a run where models were fitted to the raw data.
@@ -49,7 +59,10 @@ public sealed record IdOnlyPriors(
     double ChargeMuChargeSlope,
     double ChargeMuBasicSlope,
     ShapeSample[] Shapes,
-    string Source)
+    string Source,
+    double SequenceChargeIntercept = 0,
+    double SequenceChargeSqrtMassSlope = 0,
+    double SequenceChargeNetBasicSlope = 0)
 {
     /// <summary>
     /// Learns the priors from species whose models were fitted to the raw data.
@@ -89,6 +102,13 @@ public sealed record IdOnlyPriors(
             .ToArray();
         var (zIntercept, zChargeSlope, zBasicSlope) = LeastSquares(charge);
 
+        var sequenceCharge = pairs
+            .Where(p => p.Model.ChargeDistribution is GaussianChargeDistribution)
+            .Select(p => (X1: Math.Sqrt(p.Species.Anchor.MonoisotopicMass), X2: (double)NetBasicResidueCount(p.Species),
+                Y: ((GaussianChargeDistribution)p.Model.ChargeDistribution).MuZ))
+            .ToArray();
+        var (sIntercept, sMassSlope, sNetBasicSlope) = LeastSquares(sequenceCharge);
+
         var shapes = pairs
             .Where(p => p.Model.ChargeDistribution is GaussianChargeDistribution)
             .Select(p => new ShapeSample(
@@ -97,7 +117,8 @@ public sealed record IdOnlyPriors(
                 ((GaussianChargeDistribution)p.Model.ChargeDistribution).SigmaZ))
             .ToArray();
 
-        return new IdOnlyPriors(rtOffset, aIntercept, aSlope, fallback, zIntercept, zChargeSlope, zBasicSlope, shapes, source);
+        return new IdOnlyPriors(rtOffset, aIntercept, aSlope, fallback, zIntercept, zChargeSlope, zBasicSlope, shapes, source,
+            sIntercept, sMassSlope, sNetBasicSlope);
     }
 
     /// <summary>
@@ -105,7 +126,12 @@ public sealed record IdOnlyPriors(
     /// <paramref name="seed"/> and the species' anchor identifier, so a species gets the same draw
     /// whatever else is in the set.
     /// </summary>
-    public ProteoformModel[] Predict(IReadOnlyList<IdentifiedSpecies> species, int seed = 0)
+    /// <param name="chargePredictor">
+    /// Whether the charge centre comes from the identifications' precursor charges or, for input that
+    /// does not carry them, from mass and sequence alone.
+    /// </param>
+    public ProteoformModel[] Predict(
+        IReadOnlyList<IdentifiedSpecies> species, int seed = 0, ChargePredictor chargePredictor = ChargePredictor.ObservedCharges)
     {
         if (species is null) throw new ArgumentNullException(nameof(species));
         if (Shapes.Length == 0) throw new InvalidOperationException("The priors carry no shape samples.");
@@ -118,7 +144,10 @@ public sealed record IdOnlyPriors(
                 : FallbackLogAbundance;
 
             var shape = Shapes[StableIndex(seed, s.Anchor.Identifier, Shapes.Length)];
-            double muZ = ChargeMuIntercept + ChargeMuChargeSlope * MeanPrecursorCharge(s) + ChargeMuBasicSlope * BasicResidueCount(s);
+            double muZ = chargePredictor == ChargePredictor.ObservedCharges
+                ? ChargeMuIntercept + ChargeMuChargeSlope * MeanPrecursorCharge(s) + ChargeMuBasicSlope * BasicResidueCount(s)
+                : SequenceChargeIntercept + SequenceChargeSqrtMassSlope * Math.Sqrt(s.Anchor.MonoisotopicMass)
+                  + SequenceChargeNetBasicSlope * NetBasicResidueCount(s);
 
             return new ProteoformModel(
                 s.Anchor.MonoisotopicMass,
@@ -151,14 +180,24 @@ public sealed record IdOnlyPriors(
     /// precursor charges it explains the fitted charge centre slightly better than either alone
     /// (R² 0.946 against 0.939 on rep2 fract7). On its own it is weaker than mass (0.30 against 0.48).
     /// </summary>
-    public static int BasicResidueCount(IdentifiedSpecies species)
+    public static int BasicResidueCount(IdentifiedSpecies species) => CountResidues(species, "KR");
+
+    /// <summary>
+    /// K+R+H minus D+E in the anchor's sequence, modifications stripped. With √mass it is the best
+    /// charge-centre predictor that needs no precursor charge: R² 0.62 on rep2 fract7, against 0.50
+    /// for √mass alone and 0.59 for √mass with K+R.
+    /// </summary>
+    public static int NetBasicResidueCount(IdentifiedSpecies species) =>
+        CountResidues(species, "KRH") - CountResidues(species, "DE");
+
+    private static int CountResidues(IdentifiedSpecies species, string residues)
     {
         int count = 0, depth = 0;
         foreach (char c in species.Anchor.FullSequence)
         {
             if (c == '[') depth++;
             else if (c == ']') depth--;
-            else if (depth == 0 && (c == 'K' || c == 'R')) count++;
+            else if (depth == 0 && residues.IndexOf(c) >= 0) count++;
         }
 
         return count;

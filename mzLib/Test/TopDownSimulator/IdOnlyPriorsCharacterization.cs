@@ -80,6 +80,20 @@ public class IdOnlyPriorsCharacterization
             fit.Select(j => (double)Basic(j, "KR")).ToArray(), muZ);
         Regress2("mass (kDa) + K+R",
             fit.Select(j => j.Mass / 1000).ToArray(), fit.Select(j => (double)Basic(j, "KR")).ToArray(), muZ);
+        Console.WriteLine("  -- sequence and mass only (no precursor charge):");
+        Regress2("mass (kDa) + K+R+H",
+            fit.Select(j => j.Mass / 1000).ToArray(), fit.Select(j => (double)Basic(j, "KRH")).ToArray(), muZ);
+        Regress2("sqrt mass + K+R",
+            fit.Select(j => Math.Sqrt(j.Mass)).ToArray(), fit.Select(j => (double)Basic(j, "KR")).ToArray(), muZ);
+        Regress2("sqrt mass + K+R+H",
+            fit.Select(j => Math.Sqrt(j.Mass)).ToArray(), fit.Select(j => (double)Basic(j, "KRH")).ToArray(), muZ);
+        Regress2("mass (kDa) + basic fraction K+R/length",
+            fit.Select(j => j.Mass / 1000).ToArray(), fit.Select(j => Basic(j, "KR") / (double)Length(j)).ToArray(), muZ);
+        Regress2("sqrt mass + acidic D+E",
+            fit.Select(j => Math.Sqrt(j.Mass)).ToArray(), fit.Select(j => (double)Basic(j, "DE")).ToArray(), muZ);
+        Regress("K+R+H - D+E (net basic)", fit.Select(j => (double)(Basic(j, "KRH") - Basic(j, "DE"))), muZ);
+        Regress2("sqrt mass + net basic",
+            fit.Select(j => Math.Sqrt(j.Mass)).ToArray(), fit.Select(j => (double)(Basic(j, "KRH") - Basic(j, "DE"))).ToArray(), muZ);
         Regress("charge sigma ~ K+R", fit.Select(j => (double)Basic(j, "KR")), fit.Select(j => j.ChargeSigma).ToArray());
 
         // --- Shape priors ---
@@ -97,6 +111,9 @@ public class IdOnlyPriorsCharacterization
     private static int Basic(Joined j, string residues) =>
         System.Text.RegularExpressions.Regex.Replace(j.Species.Anchor.FullSequence, @"\[[^\]]*\]", "")
             .Count(residues.Contains);
+
+    private static int Length(Joined j) =>
+        System.Text.RegularExpressions.Regex.Replace(j.Species.Anchor.FullSequence, @"\[[^\]]*\]", "").Length;
 
     /// <summary>Two-predictor least squares, solved through the 2x2 normal equations on centred data.</summary>
     private static void Regress2(string label, double[] x1, double[] x2, double[] y)

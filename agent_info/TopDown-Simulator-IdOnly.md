@@ -100,7 +100,50 @@ Per scan, m/z 600–2000:
   metric, such as peaks above S/N 10 or per-species apex envelopes, is needed to judge the signal model
   there.
 
+## Without precursor charges
+
+`ChargePredictor.SequenceOnly` predicts μ_z from mass and sequence alone. To use it in
+`SimulateHeldOutFromIdsOnly`, set `MZLIB_TOPDOWN_SIM_IDONLY_CHARGE=sequence`. The simulated charge range
+then comes from the predicted μ_z ± 3σ_z.
+
+On rep2 fract7, the best sequence-only predictor is √mass plus net basic residues (K+R+H − D+E):
+R² 0.62, residual 1.74. The alternatives scored lower:
+
+| Predictor | R² |
+|---|---|
+| √mass + K+R | 0.59 |
+| √mass + D+E | 0.59 |
+| mass + K+R | 0.58 |
+| √mass alone | 0.50 |
+| K+R alone | 0.30 |
+
+On rep1, the error against rep1's fitted μ_z is mean |1.37| charges, against 0.46 with precursor charges.
+The whole-scan metrics do not change, because they cannot see the charge distribution.
+
+`CompareChargeProfiles` compares each species' observed per-charge profile, summed over the anchor
+RT ± 0.25 min across charges 5–40 of rep1's raw data, with each model's f(z):
+
+| Model | Median cos | p25 cos | Most intense charge within 1 | Offset p10 / median / p90 |
+|---|---|---|---|---|
+| fitted to rep1 raw | 0.812 | 0.699 | 50 % | −3 / −1 / +2 |
+| IDs, observed charges | 0.765 | 0.665 | 44 % | −4 / −1 / +3 |
+| IDs, sequence only | 0.842 | 0.756 | 58 % | −2 / 0 / +1 |
+| (mean member precursor charge) | – | – | – | −4 / −1 / +3 |
+
+**The precursor charges chosen for MS2 sit about one below the envelope's most intense charge.** The
+fitter only extracts members' charges ± 2, so the fitted μ_z inherits that selection bias, and so does
+every predictor trained on the fits. The sequence-only predictor is the least biased against the
+observed profiles.
+
+Read the comparison with care. The observed profile includes random peaks and overlapping species
+inside the extraction windows, the same for every model, so it is a noisy reference. Still, it suggests
+the fitter's charge window is too narrow.
+
 ## Next
+
+0. Widen the fitter's extraction charge range, for example to the sequence-predicted μ_z ± 3σ_z combined
+   with members ± 2. Then refit, retrain the priors and rerun `CompareChargeProfiles`. This removes the
+   MS2-selection bias from the fitted charge centres.
 
 1. A signal-focused comparison: per species, real versus simulated envelope intensity around the
    apex, and peaks above S/N 10 only.
