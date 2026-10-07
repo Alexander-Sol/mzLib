@@ -536,6 +536,68 @@ public class IdOnlySimulation
     }
 
     /// <summary>
+    /// Scores the sparse scans of the busy region: the real MS1 scans from 30 to 50 min with the
+    /// fewest peaks at S/N ≥ 10 (but at least 20), where a few species carry clear signal. For each,
+    /// the nearest scan of every simulation is compared on its S/N ≥ 10 peaks (threshold from the real
+    /// scan's injection time), and the identified species eluting there are listed.
+    /// </summary>
+    [Test]
+    [Explicit("Scores the sparsest real scans of 30-50 min against each simulation")]
+    public static void CompareSparseScans()
+    {
+        var real = ReadMs1(RawPath(TestStem));
+        var simulations = new List<(string Label, MsDataScan[] Scans)> { ("fitted", ReadMs1(FittedMzml(TestStem))) };
+        foreach (string template in new[] { "train", "notemplate" })
+            if (File.Exists(IdOnlyMzml(template, Charge)))
+                simulations.Add(($"ids, {template}", ReadMs1(IdOnlyMzml(template, Charge))));
+        var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));
+
+        NoiseFloorModel NoiseOf(MsDataScan s) => new(NoiseFloorModel.JurkatNoiseTimesInjectionTime / (s.InjectionTime ?? 50));
+        (double[] Mz, double[] I) Bright(MsDataScan s, NoiseFloorModel n) =>
+            SignalPeaks.Select(s.MassSpectrum.XArray, s.MassSpectrum.YArray, n, 10, 600, 2000);
+
+        // Sparse but identified: at least 30 % of the real bright peaks are matched by the fitted
+        // simulation, so the signal there is species the simulation knows about. One per minute.
+        var fittedScans = simulations[0].Scans;
+        var sparse = real.Where(s => s.RetentionTime is >= 30 and <= 50)
+            .Select(s =>
+            {
+                var n = NoiseOf(s);
+                var (rMz, rI) = Bright(s, n);
+                var (fMz, fI) = Bright(Nearest(fittedScans, s.RetentionTime), n);
+                return (Scan: s, Count: rMz.Length, Explained: rMz.Length > 0 ? CentroidSpectrumComparison.Compare(rMz, rI, fMz, fI).RealMatchedFraction : 0);
+            })
+            .Where(p => p.Count >= 20 && p.Explained >= 0.3)
+            .GroupBy(p => (int)p.Scan.RetentionTime)
+            .Select(g => g.OrderBy(p => p.Count).First())
+            .OrderBy(p => p.Count)
+            .Take(8)
+            .OrderBy(p => p.Scan.RetentionTime)
+            .Select(p => (p.Scan, p.Count))
+            .ToArray();
+
+        foreach (var (r, count) in sparse)
+        {
+            var noise = NoiseOf(r);
+            var (rMz, rI) = Bright(r, noise);
+            var eluting = fitted.Where(f => f.Abundance > 0 && Math.Abs(f.RtProfile.Mu - r.RetentionTime) < 2 * f.RtProfile.Sigma + 0.1)
+                .OrderByDescending(f => f.Abundance * f.RtProfile.Evaluate(r.RetentionTime)).Take(4)
+                .Select(f => $"{f.MonoisotopicMass:F0} Da").ToArray();
+            Console.WriteLine($"RT {r.RetentionTime:F2} (real scan {r.OneBasedScanNumber}, IT {r.InjectionTime:F1} ms): {count} peaks at S/N >= 10, " +
+                              $"brightest fitted species eluting: {(eluting.Length == 0 ? "none" : string.Join(", ", eluting))}");
+            foreach (var (label, scans) in simulations)
+            {
+                var s = Nearest(scans, r.RetentionTime);
+                var (sMz, sI) = Bright(s, noise);
+                var c = CentroidSpectrumComparison.Compare(rMz, rI, sMz, sI);
+                var whole = CentroidSpectrumComparison.Compare(r.MassSpectrum.XArray, r.MassSpectrum.YArray, s.MassSpectrum.XArray, s.MassSpectrum.YArray, 600, 2000);
+                Console.WriteLine($"    {label,-16} scan {s.OneBasedScanNumber,5}: bright {c.SimulatedPeaks,4} vs {c.RealPeaks,4}, real matched {c.RealMatchedFraction,4:P0}, " +
+                                  $"sim matched {c.SimulatedMatchedFraction,4:P0}, bright cos {c.Cosine:F2}, bright TIC {c.TicRatio:F2}x, whole-scan cos {whole.Cosine:F2}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Splits the no-template simulation's ion load by source on every 10th held-out MS1 scan from 30
     /// to 50 min: the rendered signal (identified, unidentified), the injection time AGC gives it, and
     /// the noise that follows, against the real scan's TIC, bright TIC and injection time.
