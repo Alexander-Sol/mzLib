@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
 using TopDownSimulator.Extraction;
 using TopDownSimulator.Fitting;
@@ -69,6 +70,51 @@ public class ChargeDistributionFitterTests
         Assert.That(fit.Distribution.MuZ, Is.EqualTo(trueMu).Within(1e-6));
         Assert.That(fit.Distribution.SigmaZ, Is.EqualTo(trueSigma).Within(5e-2));
         Assert.That(fit.ChargesUsed, Is.EqualTo(nC));
+    }
+
+    private static double[] Gaussian(int minZ, int maxZ, double mu, double sigma) =>
+        Enumerable.Range(minZ, maxZ - minZ + 1).Select(z => Math.Exp(-0.5 * Math.Pow((z - mu) / sigma, 2))).ToArray();
+
+    [Test]
+    public void TrimmedFitIgnoresNoiseInTheOuterCharges()
+    {
+        // A wide window: the envelope at 18 ± 2, and a noise floor plus another species' peak far out.
+        const int minZ = 5, maxZ = 40;
+        var apex = Gaussian(minZ, maxZ, 18.3, 2.0).Select(a => a + 0.01).ToArray();
+        apex[34 - minZ] += 0.4;
+
+        var moments = new ChargeDistributionFitter().Fit(BuildTruth(minZ, apex)).Distribution;
+        var trimmed = new ChargeDistributionFitter(trimFraction: 0.05).Fit(BuildTruth(minZ, apex)).Distribution;
+
+        Assert.That(Math.Abs(moments.MuZ - 18.3), Is.GreaterThan(1.0));
+        Assert.That(trimmed.MuZ, Is.EqualTo(18.3).Within(0.1));
+        Assert.That(trimmed.SigmaZ, Is.EqualTo(2.0).Within(0.15));
+    }
+
+    [Test]
+    public void TrimmedFitStopsAtANeighbouringEnvelope()
+    {
+        // Another species' envelope at lower charge, overlapping this one's flank above the trim floor.
+        var apex = Gaussian(5, 30, 18.0, 2.0).Zip(Gaussian(5, 30, 10.0, 1.2), (a, b) => a + 0.4 * b).ToArray();
+
+        var trimmed = new ChargeDistributionFitter(trimFraction: 0.05).Fit(BuildTruth(5, apex)).Distribution;
+
+        Assert.That(trimmed.MuZ, Is.EqualTo(18.0).Within(0.1));
+        Assert.That(trimmed.SigmaZ, Is.EqualTo(2.0).Within(0.1));
+    }
+
+    [Test]
+    public void TrimmedFitIsExactForATruncatedGaussian()
+    {
+        // The window ends just above the envelope's centre, as a members-only window can.
+        var apex = Gaussian(10, 16, 15.4, 1.8);
+
+        var moments = new ChargeDistributionFitter().Fit(BuildTruth(10, apex)).Distribution;
+        var trimmed = new ChargeDistributionFitter(trimFraction: 0.05).Fit(BuildTruth(10, apex)).Distribution;
+
+        Assert.That(moments.MuZ, Is.LessThan(14.8));
+        Assert.That(trimmed.MuZ, Is.EqualTo(15.4).Within(1e-6));
+        Assert.That(trimmed.SigmaZ, Is.EqualTo(1.8).Within(1e-6));
     }
 
     [Test]

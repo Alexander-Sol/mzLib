@@ -77,9 +77,17 @@ The real-data entry points are `[Explicit]` tests in `mzLib/Test/FileReadingTest
 Behaviour is controlled with `MZLIB_TOPDOWN_SIM_*` environment variables, all read in
 `AnalysisExample.cs`: `MODE`, `NO_DEDUP`, `NO_GLOBAL_ABUNDANCE_REFIT`, `GLOBAL_REFIT_MAX_MODELS`,
 `CONSTANT_PEAK_WIDTH`, `MIN_SAMPLES_PER_SIGMA`, `PEAK_WIDTH_K`, `MASS_SHIFT_DA`,
-`NOISE_DENSITY_SCALE`, `NOISE_CONDITIONING` (`none`, `amplitude` or `full`, the default) and
+`NOISE_DENSITY_SCALE`, `NOISE_CONDITIONING` (`none`, `amplitude` or `full`, the default),
+`CHARGE_WINDOW` (`scan`, the default: members' precursor charges ± 2 plus every charge inside the
+MS1 m/z range; `sequence`: plus the sequence-predicted μ_z ± 3σ from `CHARGE_PRIORS`; `members`: the
+`.v2` behaviour), `CHARGE_TRIM` (0.05 by default; 0 restores moments over the whole window) and
 `OUTPUT_TAG` (appended to the export label so earlier exports are not overwritten; the scan
-realism harness reads the same tag).
+realism harness reads the same tag). The current exports are `.v3`; see
+`TopDown-Simulator-IdOnly.md` for why the charge window changed.
+
+The ID-only harness (`Test/TopDownSimulator/IdOnlySimulation.cs`) reads `FIT_TAG` (the fitted
+export to train and score against, `.v2` by default), `IDONLY_TEMPLATE` (`train` or `self`) and
+`IDONLY_CHARGE` (`residue`, the default, `sequence` or `observed`).
 
 `GLOBAL_REFIT_MAX_MODELS` now defaults to 10000. It was 200 while building the refit basis was
 quadratic in model count; the basis now only visits models whose envelope reaches each sample.
@@ -120,6 +128,15 @@ because AGC extends injection time. Three measurements show it is random:
 
 So the model uses independent per-scan singlets with no persistent contaminants. Do not add a
 polymer or background generator.
+
+### Charge envelopes are broad, and MS2 picks precursors below their apex
+Over the whole MS1 m/z range, rep1/rep2 fract7 envelopes have σ_z ≈ 3.7 (median), growing with μ_z
+(σ_z ≈ −0.66 + 0.21 μ_z). The scan's m/z floor (600) cuts off the high charges of most species.
+MS2-selected precursor charges sit about one below the most intense charge. Extracting only the
+members' charges ± 2 therefore truncates the envelope and pulls the fitted μ_z towards the selected
+charges; that window also made the precursor charge look like a near-perfect μ_z predictor (R² 0.94)
+when it is a poor one (0.36). Fit charge distributions over the scan's whole charge range with the
+trimmed log-parabola fit (`ChargeDistributionFitter(trimFraction: 0.05)`).
 
 ### Peak jitter laws (`Noise/PeakJitterModel.cs`)
 These were measured on rep2 fract7 against the top 400 IDs (`SignalJitterCharacterization.cs`):

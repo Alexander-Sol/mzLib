@@ -139,11 +139,84 @@ Read the comparison with care. The observed profile includes random peaks and ov
 inside the extraction windows, the same for every model, so it is a noisy reference. Still, it suggests
 the fitter's charge window is too narrow.
 
-## Next
+## The `.v3` fits: the whole charge range
 
-0. Widen the fitter's extraction charge range, for example to the sequence-predicted μ_z ± 3σ_z combined
-   with members ± 2. Then refit, retrain the priors and rerun `CompareChargeProfiles`. This removes the
-   MS2-selection bias from the fitted charge centres.
+Everything above was measured on the `.v2` fits. Those extracted each species over its members'
+precursor charges ± 2 and fitted μ_z, σ_z by moments over that window.
+
+**Why the window was wrong.** Over charges 5–40, rep1's per-charge apex profiles show that the
+envelopes are broad, with σ_z ≈ 3 for 14–17 kDa species. They end where the species leaves the scan
+range (m/z < 600). The ± 2 window truncated them. Moments over a truncated window are pulled
+towards the window centre, which sits on the MS2-selected charges, about one charge below the apex.
+
+**What changed** (`ExportRep{1,2}FullNoisySimulation` with `OUTPUT_TAG=.v3`):
+
+- **Window:** members ± 2 plus every charge at which the species lands inside the scan window
+  (`GroundTruthExtractor.ObservableCharges`, `CHARGE_WINDOW=scan`). A sequence-predicted window
+  (`CHARGE_WINDOW=sequence`) was tried first. With `.v2`'s narrow σ_z it was still too narrow, and its
+  edges came from the predictor itself, which is circular.
+- **Charge fit:** `ChargeDistributionFitter(trimFraction: 0.05)`. It keeps the contiguous run of
+  charges around the most intense one that stays above 5 % of it and does not climb back into a
+  neighbouring envelope. It then fits a parabola to log apex weighted by apex² (Caruana), which is
+  exact for a truncated Gaussian.
+- **Unexplained energy after the global refit:** rep2 0.45 → 0.359, rep1 0.278.
+
+**Charge profiles against rep1's observed profiles** (`CompareChargeProfiles`; `.v2` numbers are
+from the table above):
+
+| Model | Median cos `.v2` → `.v3` | Most intense charge within 1 `.v2` → `.v3` | Offset median `.v3` |
+|---|---|---|---|
+| fitted to rep1 raw | 0.812 → **0.961** | 50 % → **83 %** | 0 |
+| IDs, observed charges | 0.765 → 0.948 | 44 % → 50 % | −1 |
+| IDs, sequence only (√mass + KRH − DE) | 0.842 → 0.970 | 58 % → 60 % | 0 |
+| IDs, residue weights | – → 0.970 | – → 61 % | 0 |
+
+The fitted model now beats every predictor on apex placement. Its cosine is about the same as the
+sequence predictors' (0.961 against 0.970). The ID-only rows also gain from σ_z predicted from μ_z,
+below; with bootstrap σ_z the sequence predictor scored 0.958.
+
+**What identifications predict, re-measured on the `.v3` fits** (rep2, 436 species,
+`IdOnlyPriorsCharacterization` with `FIT_TAG=.v3`):
+
+| μ_z predictor | R² `.v2` → `.v3` | Residual sd `.v3` |
+|---|---|---|
+| mean member precursor charge | 0.939 → 0.36 | 2.35 |
+| √mass | 0.50 → 0.64 | 1.77 |
+| √mass + net basic (KRH − DE) | 0.62 → 0.70 | 1.61 |
+| √mass + a weight per K, R, H, D, E | – → **0.72** | 1.57 |
+| the same + mean member charge | – → 0.72 | 1.57 |
+| the same + sequence length | – → 0.72 | 1.56 |
+
+- **The precursor charge predicts little.** Its R² of 0.94 was an artefact of the window: the fitted μ_z
+  was anchored to the members' charges. With the residue model it adds nothing.
+- **Residue weights** (`ResidueChargeModel`, fitted on rep2):
+  μ_z = −13.05 + 0.228·√M + 0.146 K + 0.218 R + 0.189 H − 0.048 D − 0.019 E.
+  Arginine and histidine count more than lysine. The acidic residues count little.
+- **σ_z grows with μ_z:** σ_z = −0.66 + 0.21·μ_z (R² 0.42; against mass, 0.19). `IdOnlyPriors` now
+  predicts σ_z from the predicted μ_z instead of drawing it.
+- **Abundance:** fitted over the whole envelope, it relates less closely to one precursor's
+  intensity. Summed member intensity: R² 0.74 → 0.53. The brightest member's intensity scores 0.59,
+  and `IdOnlyPriors` now uses it. Dividing by the predicted f(z) at the precursor's charge (0.60),
+  adding mass, predicted σ_z or member count (≤ 0.59) do not help.
+- **Retention time and shapes are unchanged:** apex offset −0.015 min; σ and τ as before.
+
+**Held out on rep1, `.v3`** (`CompareHeldOut` with `FIT_TAG=.v3`, residue-weight charges):
+
+| | `.v2` | `.v3` |
+|---|---|---|
+| μ_z error vs rep1's fit, residue weights / sequence / observed | – / 1.37 / 0.46 | 0.84 / 0.92 / 1.51 |
+| log₁₀ abundance error, mean \|err\| (r) | 0.24 (0.83) | 0.34 (0.69) |
+| whole run log TIC r, `train` template | 0.971 | 0.971 |
+| cos at 41.1 min, fitted | 0.881 | 0.902 |
+| cos at 41.1 min, IDs `self` / `train` | 0.678 / 0.668 | 0.580 / 0.557 |
+
+At 41.1 min the bright H2A proteoforms (13.75–13.80 kDa) get μ_z within 0.2 and RT within 0.1–0.2 min.
+Their abundances come out 0.2–0.7 dex low, and in the wrong order among near-isobaric proteoforms. A
+regression with slope below one compresses the top of the range, and the `.v2` abundance R² was
+inflated by the same window artefact as the charge. The 35.1 and 53.8 min scans are unchanged
+(noise-dominated).
+
+## Next
 
 1. A signal-focused comparison: per species, real versus simulated envelope intensity around the
    apex, and peaks above S/N 10 only.

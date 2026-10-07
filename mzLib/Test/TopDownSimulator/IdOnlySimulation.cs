@@ -66,20 +66,43 @@ public class IdOnlySimulation
 
         throw new IOException($"No readable copy of {stem}.raw.");
     }
-    private static string FittedSidecar(string stem) => $@"{Dir}\{stem}.full.v2.noisy.simulated.groundtruth.tsv";
-    private static string FittedMzml(string stem) => $@"{Dir}\{stem}.full.v2.noisy.simulated.mzML";
-    private static string PriorsPath => $@"{Dir}\idonly-priors.{TrainStem}.json";
+    /// <summary>
+    /// The output tag of the fitted exports to train and score against, ".v2" by default. Set with
+    /// MZLIB_TOPDOWN_SIM_FIT_TAG. Priors and ID-only exports from tags other than ".v2" carry the tag
+    /// in their names, so earlier results stay readable.
+    /// </summary>
+    private static string FitTag =>
+        Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_FIT_TAG")?.Trim() is { Length: > 0 } tag ? tag : ".v2";
+
+    private static string DerivedTag => FitTag == ".v2" ? "" : FitTag;
+    private static string FittedSidecar(string stem) => $@"{Dir}\{stem}.full{FitTag}.noisy.simulated.groundtruth.tsv";
+    private static string FittedMzml(string stem) => $@"{Dir}\{stem}.full{FitTag}.noisy.simulated.mzML";
+    private static string PriorsPath => $@"{Dir}\idonly-priors.{TrainStem}{DerivedTag}.json";
     private static string IdOnlyMzml(string template, ChargePredictor charge) =>
-        $@"{Dir}\{TestStem}.idonly-{template}{(charge == ChargePredictor.SequenceOnly ? "-seqcharge" : "")}.noisy.simulated.mzML";
+        $@"{Dir}\{TestStem}.idonly-{template}{ChargeSuffix(charge)}{DerivedTag}.noisy.simulated.mzML";
+
+    private static string ChargeSuffix(ChargePredictor charge) => charge switch
+    {
+        ChargePredictor.SequenceOnly => "-seqcharge",
+        ChargePredictor.ResidueWeights => "-rescharge",
+        _ => "",
+    };
+
+    private static readonly ChargePredictor[] ChargePredictors =
+        { ChargePredictor.ObservedCharges, ChargePredictor.SequenceOnly, ChargePredictor.ResidueWeights };
 
     /// <summary>
-    /// Where the charge centre comes from: the identifications' precursor charges (default) or, with
-    /// MZLIB_TOPDOWN_SIM_IDONLY_CHARGE=sequence, mass and sequence alone.
+    /// Where the charge centre comes from: mass and a weight per charged residue (default), or with
+    /// MZLIB_TOPDOWN_SIM_IDONLY_CHARGE=sequence, mass and net basic residues, or with =observed, the
+    /// identifications' precursor charges.
     /// </summary>
     private static ChargePredictor Charge =>
-        Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_IDONLY_CHARGE")?.Trim().ToLowerInvariant() == "sequence"
-            ? ChargePredictor.SequenceOnly
-            : ChargePredictor.ObservedCharges;
+        Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_IDONLY_CHARGE")?.Trim().ToLowerInvariant() switch
+        {
+            "sequence" => ChargePredictor.SequenceOnly,
+            "observed" => ChargePredictor.ObservedCharges,
+            _ => ChargePredictor.ResidueWeights,
+        };
 
     /// <summary>The retention times the per-scan comparison looks at, one per regime.</summary>
     private static readonly (double Rt, string Regime)[] TargetTimes =
@@ -109,6 +132,13 @@ public class IdOnlySimulation
         Console.WriteLine($"rt apex offset {priors.RtApexOffset:F4} min");
         Console.WriteLine($"log10 abundance = {priors.LogAbundanceIntercept:F3} + {priors.LogAbundanceSlope:F4} log10(sum precursor intensity), fallback {priors.FallbackLogAbundance:F3}");
         Console.WriteLine($"charge mu = {priors.ChargeMuIntercept:F3} + {priors.ChargeMuChargeSlope:F4} mean charge + {priors.ChargeMuBasicSlope:F4} K+R");
+        Console.WriteLine($"sequence charge mu = {priors.SequenceChargeIntercept:F3} + {priors.SequenceChargeSqrtMassSlope:F4} sqrt mass + {priors.SequenceChargeNetBasicSlope:F4} (KRH - DE)");
+        if (priors.ResidueCharge is { } r)
+            Console.WriteLine($"residue charge mu = {r.Intercept:F3} + {r.SqrtMassSlope:F4} sqrt mass" +
+                              string.Concat(r.Residues.Select((c, i) => $" {r.Weights[i]:+0.0000;-0.0000} {c}")) + $", residual sd {r.ResidualSd:F3}");
+        if (priors.ChargeSigmaIntercept is { } sa)
+            Console.WriteLine($"charge sigma = {sa:F3} + {priors.ChargeSigmaMuSlope:F4} charge mu");
+        Console.WriteLine($"median charge sigma {priors.Shapes.Select(s => s.ChargeSigma).OrderBy(x => x).ElementAt(priors.Shapes.Length / 2):F3}");
         Console.WriteLine($"wrote {PriorsPath}");
     }
 
@@ -157,19 +187,18 @@ public class IdOnlySimulation
     [Explicit("Scores the ID-only rep1 simulations and the fitted upper bound against rep1's raw file")]
     public static void CompareHeldOut()
     {
-        CompareParameters(ChargePredictor.ObservedCharges);
-        CompareParameters(ChargePredictor.SequenceOnly);
+        foreach (var charge in ChargePredictors)
+            CompareParameters(charge);
 
         var real = ReadMs1(RawPath(TestStem));
         var simulations = new List<(string Label, MsDataScan[] Scans)>
         {
             ("fitted (upper bound)", ReadMs1(FittedMzml(TestStem))),
         };
-        foreach (var charge in new[] { ChargePredictor.ObservedCharges, ChargePredictor.SequenceOnly })
+        foreach (var charge in ChargePredictors)
         foreach (string template in new[] { "self", "train" })
             if (File.Exists(IdOnlyMzml(template, charge)))
-                simulations.Add(($"ids, {template}{(charge == ChargePredictor.SequenceOnly ? ", seq charge" : "")}",
-                    ReadMs1(IdOnlyMzml(template, charge))));
+                simulations.Add(($"ids, {template}{ChargeSuffix(charge)}", ReadMs1(IdOnlyMzml(template, charge))));
 
         Console.WriteLine();
         Console.WriteLine("Whole run, simulation interpolated onto the real scan times:");
@@ -223,14 +252,15 @@ public class IdOnlySimulation
         var bySpecies = species.ToDictionary(s => s.Anchor.Identifier);
         var observedCharge = priors.Predict(species).ToDictionary(m => m.Identifier!);
         var sequenceCharge = priors.Predict(species, chargePredictor: ChargePredictor.SequenceOnly).ToDictionary(m => m.Identifier!);
+        var residueCharge = priors.Predict(species, chargePredictor: ChargePredictor.ResidueWeights).ToDictionary(m => m.Identifier!);
         var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));
+        Console.WriteLine($"fitted {FittedSidecar(TestStem)}, priors {PriorsPath}" +
+                          (priors.ResidueCharge is null ? " (no residue model; residue weights = sequence only)" : ""));
 
         var extractor = new GroundTruthExtractor(ReadMs1(RawPath(TestStem)), ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
-        var apexOffsets = new Dictionary<string, List<int>> { ["fitted to rep1 raw"] = new(), ["ids, observed charges"] = new(), ["ids, sequence only"] = new(), ["mean member precursor charge"] = new() };
-        var scores = new Dictionary<string, List<(double Cosine, bool ApexWithinOne)>>
-        {
-            ["fitted to rep1 raw"] = new(), ["ids, observed charges"] = new(), ["ids, sequence only"] = new(),
-        };
+        string[] labels = { "fitted to rep1 raw", "ids, observed charges", "ids, sequence only", "ids, residue weights" };
+        var apexOffsets = labels.Append("mean member precursor charge").ToDictionary(l => l, _ => new List<int>());
+        var scores = labels.ToDictionary(l => l, _ => new List<(double Cosine, bool ApexWithinOne)>());
 
         foreach (var fit in fitted.Where(f => f.Abundance > 0 && f.Identifier is not null && bySpecies.ContainsKey(f.Identifier)))
         {
@@ -245,6 +275,7 @@ public class IdOnlySimulation
                          ("fitted to rep1 raw", fit),
                          ("ids, observed charges", observedCharge[fit.Identifier!]),
                          ("ids, sequence only", sequenceCharge[fit.Identifier!]),
+                         ("ids, residue weights", residueCharge[fit.Identifier!]),
                      })
             {
                 var predicted = Enumerable.Range(minZ, maxZ - minZ + 1).Select(z => model.ChargeDistribution.Evaluate(z)).ToArray();
@@ -273,6 +304,37 @@ public class IdOnlySimulation
         }
     }
 
+    /// <summary>
+    /// What the charge fitter sees over a wide window: each species' per-charge XIC apex, as the
+    /// fitter takes it, its floor relative to its maximum, and what the trimmed fit makes of it.
+    /// </summary>
+    [Test]
+    [Explicit("Prints per-charge apex profiles of rep1 species over charges 5-40")]
+    public static void ChargeApexProfiles()
+    {
+        const int minZ = 5, maxZ = 40;
+        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var extractor = new GroundTruthExtractor(ReadMs1(RawPath(TestStem)), ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
+        var floors = new List<double>();
+        int shown = 0;
+        foreach (var s in species.Where((_, i) => i % 5 == 0))
+        {
+            var truth = extractor.Extract(s.Anchor.MonoisotopicMass, s.Anchor.RetentionTime, 0.25, minZ, maxZ);
+            var apex = truth.ChargeXics.Select(x => x.Max()).ToArray();
+            double max = apex.Max();
+            if (max <= 0) continue;
+            double floor = apex.OrderBy(a => a).ElementAt(apex.Length / 5) / max;
+            floors.Add(floor);
+            if (shown++ >= 12) continue;
+            var fit = new global::TopDownSimulator.Fitting.ChargeDistributionFitter(trimFraction: 0.05).Fit(truth);
+            Console.WriteLine($"{s.Anchor.MonoisotopicMass,9:F1} members {s.MinCharge + 2}-{s.MaxCharge - 2}  fit mu {fit.Distribution.MuZ,5:F1} sigma {fit.Distribution.SigmaZ,4:F1} used {fit.ChargesUsed,2}  p20/max {floor:F3}");
+            Console.WriteLine("   " + string.Join(" ", apex.Select(a => ((int)Math.Round(99 * a / max)).ToString().PadLeft(2))));
+        }
+
+        var f = floors.OrderBy(x => x).ToArray();
+        Console.WriteLine($"p20 apex / max over {f.Length} species: p25 {f[f.Length / 4]:F3}  median {f[f.Length / 2]:F3}  p75 {f[3 * f.Length / 4]:F3}");
+    }
+
     /// <summary>How far each predicted parameter lands from rep1's own fit, species by species.</summary>
     private static void CompareParameters(ChargePredictor chargePredictor)
     {
@@ -292,6 +354,17 @@ public class IdOnlySimulation
         Report("charge mu error", pairs.Select(p =>
             ((GaussianChargeDistribution)p.Pred.ChargeDistribution).MuZ - ((GaussianChargeDistribution)p.Fit.ChargeDistribution).MuZ));
         Console.WriteLine($"  log10 abundance: Pearson r {Pearson(pairs.Select(p => Math.Log10(p.Fit.Abundance)), pairs.Select(p => Math.Log10(p.Pred.Abundance))):F3}");
+
+        // The species that dominate the signal-dominated scan, where errors decide its cosine.
+        Console.WriteLine("  brightest species eluting at 41.1 min (fitted | predicted): mass, log10 A, mu_z, sigma_z, rt mu");
+        foreach (var (fit, pred) in pairs.Where(p => Math.Abs(p.Fit.RtProfile.Mu - 41.1) < 0.4)
+                     .OrderByDescending(p => Math.Max(p.Fit.Abundance, p.Pred.Abundance)).Take(8))
+        {
+            var fz = (GaussianChargeDistribution)fit.ChargeDistribution;
+            var pz = (GaussianChargeDistribution)pred.ChargeDistribution;
+            Console.WriteLine($"    {fit.MonoisotopicMass,9:F1}  {Math.Log10(fit.Abundance),5:F2} | {Math.Log10(pred.Abundance),5:F2}  " +
+                              $"{fz.MuZ,5:F1} | {pz.MuZ,5:F1}  {fz.SigmaZ,4:F1} | {pz.SigmaZ,4:F1}  {fit.RtProfile.Mu,6:F2} | {pred.RtProfile.Mu,6:F2}");
+        }
     }
 
     private static MsDataScan[] ReadMs1(string path)

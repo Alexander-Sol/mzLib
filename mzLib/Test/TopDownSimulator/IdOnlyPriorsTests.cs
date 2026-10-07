@@ -75,6 +75,44 @@ public class IdOnlyPriorsTests
     }
 
     [Test]
+    public void ResidueModelRecoversAWeightPerResidue()
+    {
+        // mu_z = 1 + 0.05 sqrt(mass) + 0.3 K + 0.2 R + 0.1 H - 0.15 D - 0.05 E, exactly.
+        var rng = new Random(3);
+        var species = Enumerable.Range(0, 80).Select(i =>
+        {
+            string seq = new string('K', rng.Next(12)) + new string('R', rng.Next(8)) + new string('H', rng.Next(4))
+                         + new string('D', rng.Next(10)) + new string('E', rng.Next(10)) + "PEPTIDE";
+            var r = Record($"id{i}", 5000 + 300 * i, 10, 10, sequence: seq);
+            return new IdentifiedSpecies(r, new[] { r }, 8, 12);
+        }).ToArray();
+        double Truth(IdentifiedSpecies s) => 1 + 0.05 * Math.Sqrt(s.Anchor.MonoisotopicMass)
+            + 0.3 * s.Anchor.FullSequence.Count(c => c == 'K') + 0.2 * s.Anchor.FullSequence.Count(c => c == 'R')
+            + 0.1 * s.Anchor.FullSequence.Count(c => c == 'H') - 0.15 * s.Anchor.FullSequence.Count(c => c == 'D')
+            - 0.05 * (s.Anchor.FullSequence.Count(c => c == 'E') - 2);   // "PEPTIDE" carries two E and one D
+        var targets = species.Select(Truth).ToArray();
+
+        var model = ResidueChargeModel.Fit(species, targets);
+
+        Assert.That(model.Residues, Is.EqualTo("KRHDE"));
+        Assert.That(model.SqrtMassSlope, Is.EqualTo(0.05).Within(1e-8));
+        Assert.That(model.Weights, Is.EqualTo(new[] { 0.3, 0.2, 0.1, -0.15, -0.05 }).Within(1e-8));
+        Assert.That(model.ResidualSd, Is.LessThan(1e-8));
+        Assert.That(model.Predict(species[7]), Is.EqualTo(targets[7]).Within(1e-8));
+    }
+
+    [Test]
+    public void SequenceChargeRangeCoversThePredictedEnvelope()
+    {
+        var shapes = new[] { new ShapeSample(0.1, 0, 2.0) };
+        var priors = new IdOnlyPriors(0, 0, 1, 5, 0, 1, 0, shapes, "test",
+            SequenceChargeIntercept: 10, SequenceChargeSqrtMassSlope: 0, SequenceChargeNetBasicSlope: 0);
+        var r = Record("x", 9000, 10, 9);
+        var range = priors.SequenceChargeRange(new IdentifiedSpecies(r, new[] { r }, 7, 11));
+        Assert.That(range, Is.EqualTo((4, 16)));
+    }
+
+    [Test]
     public void PredictionIsStablePerSpeciesWhateverElseIsInTheSet()
     {
         var shapes = Enumerable.Range(0, 50).Select(i => new ShapeSample(0.05 + 0.002 * i, 0, 1 + 0.02 * i)).ToArray();

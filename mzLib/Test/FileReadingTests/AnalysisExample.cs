@@ -9,6 +9,7 @@ using Proteomics.AminoAcidPolymer;
 using Readers;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -19,6 +20,7 @@ using TopDownSimulator.Extraction;
 using TopDownSimulator.Fitting;
 using TopDownSimulator.Model;
 using TopDownSimulator.Noise;
+using TopDownSimulator.Prediction;
 using TopDownSimulator.Simulation;
 using UsefulProteomicsDatabases;
 using Stopwatch = System.Diagnostics.Stopwatch;
@@ -1142,6 +1144,56 @@ namespace Test.FileReadingTests
         private static string GetOutputTag() =>
             Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_OUTPUT_TAG")?.Trim() ?? string.Empty;
 
+        private const string DefaultChargeWindowPriorsPath = @"D:\JurkatTopdown\idonly-priors.02-18-20_jurkat_td_rep2_fract7.json";
+
+        private enum ChargeWindow { Members, Sequence, Scan }
+
+        /// <summary>
+        /// The charges each species is extracted over, always including its members' precursor
+        /// charges ± 2. <c>scan</c> (the default) adds every charge at which the species lands inside
+        /// the MS1 scan window; <c>sequence</c> adds the sequence-predicted μ_z ± 3σ from the priors
+        /// (see <see cref="GetChargeWindowPriors"/>); <c>members</c> adds nothing, as before.
+        /// MS2 selects precursors about one charge below the envelope's most intense one and the
+        /// envelopes are broad (σ_z ≈ 3), so the members' window alone truncates them and biases the
+        /// fitted μ_z low. Set with MZLIB_TOPDOWN_SIM_CHARGE_WINDOW.
+        /// </summary>
+        private static ChargeWindow GetChargeWindow() =>
+            Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_CHARGE_WINDOW")?.Trim().ToLowerInvariant() switch
+            {
+                "members" => ChargeWindow.Members,
+                "sequence" => ChargeWindow.Sequence,
+                _ => ChargeWindow.Scan,
+            };
+
+        /// <summary>
+        /// Priors for the <c>sequence</c> charge window, from MZLIB_TOPDOWN_SIM_CHARGE_PRIORS or the
+        /// rep2 fract7 file; null, and the members' window alone, when there are none.
+        /// </summary>
+        private static IdOnlyPriors? GetChargeWindowPriors()
+        {
+            string path = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_CHARGE_PRIORS")?.Trim() is { Length: > 0 } p
+                ? p
+                : DefaultChargeWindowPriorsPath;
+            if (File.Exists(path))
+                return IdOnlyPriors.Load(path);
+
+            Console.WriteLine($"Charge window: no priors at {path}; using the members' precursor charges ± 2.");
+            return null;
+        }
+
+        /// <summary>
+        /// Fraction of the most intense charge's apex below which the charge fit stops
+        /// (see <see cref="ChargeDistributionFitter"/>); 0 fits moments over every extracted charge,
+        /// as before. Default 0.05. Set with MZLIB_TOPDOWN_SIM_CHARGE_TRIM.
+        /// </summary>
+        private static double GetChargeTrimFraction()
+        {
+            var raw = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_CHARGE_TRIM");
+            return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) && parsed is >= 0 and < 1
+                ? parsed
+                : 0.05;
+        }
+
         private static MmResultRecord[] LoadQualifiedMmRecords(
             string psmTsvPath,
             string expectedFileStem,
@@ -1328,6 +1380,15 @@ namespace Test.FileReadingTests
             var chargeRanges = new (int Min, int Max)[species.Count];
             int completed = 0;
             double minSamplesPerSigma = GetMinimumSamplesPerSigma();
+            var chargeWindow = GetChargeWindow();
+            var windowPriors = chargeWindow == ChargeWindow.Sequence ? GetChargeWindowPriors() : null;
+            double chargeTrim = GetChargeTrimFraction();
+            Console.WriteLine($"Charge window: members ± 2" + chargeWindow switch
+            {
+                ChargeWindow.Scan => $" ∪ charges inside m/z {extractor.MinScanMz:F0}-{extractor.MaxScanMz:F0}",
+                ChargeWindow.Sequence when windowPriors is not null => " ∪ sequence-predicted μ_z ± 3σ",
+                _ => "",
+            } + $", charge fit trim {chargeTrim}");
 
             Parallel.For(0, species.Count, i =>
             {
@@ -1336,6 +1397,14 @@ namespace Test.FileReadingTests
                 int maxCharge = species[i].MaxCharge;
                 if (minCharge > maxCharge)
                     return;
+                if (chargeWindow != ChargeWindow.Members)
+                {
+                    var (lo, hi) = chargeWindow == ChargeWindow.Scan
+                        ? extractor.ObservableCharges(record.MonoisotopicMass)
+                        : windowPriors?.SequenceChargeRange(species[i]) ?? (minCharge, maxCharge);
+                    minCharge = Math.Min(minCharge, lo);
+                    maxCharge = Math.Max(maxCharge, hi);
+                }
 
                 var truth = extractor.Extract(record.MonoisotopicMass, record.RetentionTime, rtHalfWidth, minCharge, maxCharge);
 
@@ -1344,7 +1413,8 @@ namespace Test.FileReadingTests
                 {
                     fit = new ParameterFitter(widthFitter: new EnvelopeWidthFitter(
                             fallbackSigmaMz: 0.012,
-                            minSamplesPerSigma: minSamplesPerSigma))
+                            minSamplesPerSigma: minSamplesPerSigma),
+                        chargeFitter: new ChargeDistributionFitter(trimFraction: chargeTrim))
                         .Fit(truth, record.Identifier);
                 }
                 catch (InvalidOperationException)

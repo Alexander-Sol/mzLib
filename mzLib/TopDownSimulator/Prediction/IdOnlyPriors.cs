@@ -17,11 +17,113 @@ public sealed record ShapeSample(double RtSigma, double RtTau, double ChargeSigm
 /// <summary>Where <see cref="IdOnlyPriors.Predict"/> takes the charge-distribution centre from.</summary>
 public enum ChargePredictor
 {
-    /// <summary>Mean precursor charge of the species' identifications, plus K+R. R² 0.946 on rep2 fract7.</summary>
+    /// <summary>
+    /// Mean precursor charge of the species' identifications, plus K+R. R² 0.45 on rep2 fract7 fits
+    /// over the whole charge range; biased low, because MS2 selects charges below the apex.
+    /// </summary>
     ObservedCharges,
 
-    /// <summary>√mass and net basic residues only, for identifications without charges. R² 0.62.</summary>
+    /// <summary>√mass and net basic residues (K+R+H − D−E). R² 0.70.</summary>
     SequenceOnly,
+
+    /// <summary>
+    /// √mass and a separate weight for each charged residue (<see cref="ResidueChargeModel"/>). R² 0.72,
+    /// the best found. Falls back to <see cref="SequenceOnly"/> when the priors carry no residue model.
+    /// </summary>
+    ResidueWeights,
+}
+
+/// <summary>
+/// μ_z = intercept + slope·√mass + Σ weight_r·count_r over the residues in <see cref="Residues"/>,
+/// counted in the anchor's sequence with modifications stripped.
+/// </summary>
+/// <param name="ResidualSd">Residual standard deviation on the training species, in charges.</param>
+public sealed record ResidueChargeModel(
+    double Intercept,
+    double SqrtMassSlope,
+    string Residues,
+    double[] Weights,
+    double ResidualSd)
+{
+    /// <summary>The residues the default model weighs: the basic K, R and H and the acidic D and E.</summary>
+    public const string ChargedResidues = "KRHDE";
+
+    public double Predict(IdentifiedSpecies species)
+    {
+        double mu = Intercept + SqrtMassSlope * Math.Sqrt(species.Anchor.MonoisotopicMass);
+        for (int i = 0; i < Residues.Length; i++)
+            mu += Weights[i] * IdOnlyPriors.CountResidues(species, Residues[i].ToString());
+        return mu;
+    }
+
+    /// <summary>Ordinary least squares of <paramref name="targets"/> on √mass and each residue count.</summary>
+    public static ResidueChargeModel Fit(
+        IReadOnlyList<IdentifiedSpecies> species, IReadOnlyList<double> targets, string residues = ChargedResidues)
+    {
+        if (species.Count != targets.Count) throw new ArgumentException("One target per species is needed.");
+        int p = residues.Length + 2;
+        if (species.Count <= p) throw new InvalidOperationException($"At least {p + 1} species are needed.");
+
+        var x = species.Select(s =>
+        {
+            var row = new double[p];
+            row[0] = 1;
+            row[1] = Math.Sqrt(s.Anchor.MonoisotopicMass);
+            for (int i = 0; i < residues.Length; i++)
+                row[i + 2] = IdOnlyPriors.CountResidues(s, residues[i].ToString());
+            return row;
+        }).ToArray();
+
+        double[] beta = LinearLeastSquares.Solve(x, targets);
+        double rss = 0;
+        for (int n = 0; n < x.Length; n++)
+        {
+            double fit = 0;
+            for (int j = 0; j < p; j++) fit += beta[j] * x[n][j];
+            rss += (targets[n] - fit) * (targets[n] - fit);
+        }
+
+        return new ResidueChargeModel(beta[0], beta[1], residues, beta.Skip(2).ToArray(), Math.Sqrt(rss / (x.Length - p)));
+    }
+}
+
+/// <summary>Least squares through the normal equations, solved by Gaussian elimination with partial pivoting.</summary>
+public static class LinearLeastSquares
+{
+    public static double[] Solve(IReadOnlyList<double[]> x, IReadOnlyList<double> y)
+    {
+        int p = x[0].Length;
+        var a = new double[p, p + 1];
+        for (int n = 0; n < x.Count; n++)
+        for (int i = 0; i < p; i++)
+        {
+            for (int j = 0; j < p; j++) a[i, j] += x[n][i] * x[n][j];
+            a[i, p] += x[n][i] * y[n];
+        }
+
+        double scale = 0;
+        for (int i = 0; i < p; i++) scale = Math.Max(scale, Math.Abs(a[i, i]));
+
+        for (int col = 0; col < p; col++)
+        {
+            int pivot = col;
+            for (int r = col + 1; r < p; r++)
+                if (Math.Abs(a[r, col]) > Math.Abs(a[pivot, col])) pivot = r;
+            if (!(Math.Abs(a[pivot, col]) > 1e-10 * scale))
+                throw new InvalidOperationException("The predictors are collinear.");
+            for (int j = col; j <= p; j++) (a[col, j], a[pivot, j]) = (a[pivot, j], a[col, j]);
+            for (int r = 0; r < p; r++)
+            {
+                if (r == col) continue;
+                double f = a[r, col] / a[col, col];
+                for (int j = col; j <= p; j++) a[r, j] -= f * a[col, j];
+            }
+        }
+
+        var beta = new double[p];
+        for (int i = 0; i < p; i++) beta[i] = a[i, p] / a[i, i];
+        return beta;
+    }
 }
 
 /// <summary>
@@ -30,19 +132,23 @@ public enum ChargePredictor
 /// </summary>
 /// <remarks>
 /// <para>
-/// What an identification can predict was measured on Jurkat rep2 fract7, 451 species fitted from
-/// the raw data:
+/// What an identification can predict was measured on Jurkat rep2 fract7, 436 species fitted from
+/// the raw data over each species' whole observable charge range (the <c>.v3</c> fits):
 /// </para>
 /// <list type="bullet">
-/// <item><b>Elution apex:</b> the anchor's MS2 time, median offset −0.014 min, interquartile range
+/// <item><b>Elution apex:</b> the anchor's MS2 time, median offset −0.015 min, interquartile range
 /// 0.12 min, about one elution σ.</item>
-/// <item><b>Abundance:</b> log10 of the summed precursor intensity of the species' members,
-/// R² 0.74, residual 0.34 dex.</item>
-/// <item><b>Charge-distribution centre:</b> the mean member precursor charge plus the anchor's count
-/// of lysines and arginines, R² 0.946, residual 0.66 charges. The precursor charges carry almost all
-/// of it (0.939 alone); mass alone manages 0.48 and K+R alone 0.30.</item>
-/// <item><b>Elution width, tail and charge-distribution width:</b> no measurable dependence on
-/// retention time or mass, so they are drawn jointly from the fitted population.</item>
+/// <item><b>Abundance:</b> log10 of the brightest member's precursor intensity, R² 0.59, residual
+/// 0.44 dex. Priors fitted before this carry <see cref="AbundanceFromMaxIntensity"/> false and use
+/// the members' summed intensity.</item>
+/// <item><b>Charge-distribution centre:</b> √mass and a weight per charged residue
+/// (<see cref="ResidueChargeModel"/>), R² 0.72, residual 1.57 charges. The precursor charges add
+/// nothing to it and alone manage 0.36: MS2 selects charges below the envelope's apex. (Fits over
+/// the members' charges ± 2 only made them look like a near-perfect predictor.)</item>
+/// <item><b>Charge-distribution width:</b> σ_z grows with μ_z (R² 0.42), so it is predicted from
+/// the predicted μ_z.</item>
+/// <item><b>Elution width and tail:</b> no measurable dependence on retention time or mass, so
+/// they are drawn jointly from the fitted population.</item>
 /// </list>
 /// <para>
 /// Predictions are regressions, not draws, wherever there is a predictor. The regression residual
@@ -62,8 +168,14 @@ public sealed record IdOnlyPriors(
     string Source,
     double SequenceChargeIntercept = 0,
     double SequenceChargeSqrtMassSlope = 0,
-    double SequenceChargeNetBasicSlope = 0)
+    double SequenceChargeNetBasicSlope = 0,
+    ResidueChargeModel? ResidueCharge = null,
+    double? ChargeSigmaIntercept = null,
+    double ChargeSigmaMuSlope = 0,
+    bool AbundanceFromMaxIntensity = false)
 {
+    /// <summary>The narrowest charge distribution <see cref="Predict"/> will produce from the σ_z regression.</summary>
+    public const double MinimumPredictedChargeSigma = 0.5;
     /// <summary>
     /// Learns the priors from species whose models were fitted to the raw data.
     /// </summary>
@@ -88,8 +200,10 @@ public sealed record IdOnlyPriors(
 
         double rtOffset = Median(pairs.Select(p => p.Model.RtProfile.Mu - p.Species.Anchor.RetentionTime));
 
+        // The brightest member's precursor intensity, not the members' sum: R² 0.59 against 0.53 for
+        // models fitted over the scan's whole charge range on rep2 fract7.
         var abundance = pairs
-            .Select(p => (X: LogSummedPrecursorIntensity(p.Species), Y: Math.Log10(p.Model.Abundance)))
+            .Select(p => (X: LogMaxPrecursorIntensity(p.Species), Y: Math.Log10(p.Model.Abundance)))
             .Where(p => double.IsFinite(p.X))
             .ToArray();
         var (aIntercept, aSlope) = LeastSquares(abundance);
@@ -109,6 +223,27 @@ public sealed record IdOnlyPriors(
             .ToArray();
         var (sIntercept, sMassSlope, sNetBasicSlope) = LeastSquares(sequenceCharge);
 
+        // Small or uniform training sets cannot separate the residues; the net-basic model then stands alone.
+        var gaussian = pairs.Where(p => p.Model.ChargeDistribution is GaussianChargeDistribution).ToArray();
+        ResidueChargeModel? residueCharge;
+        try
+        {
+            residueCharge = ResidueChargeModel.Fit(
+                gaussian.Select(p => p.Species).ToArray(),
+                gaussian.Select(p => ((GaussianChargeDistribution)p.Model.ChargeDistribution).MuZ).ToArray());
+        }
+        catch (InvalidOperationException)
+        {
+            residueCharge = null;
+        }
+
+        // Broader envelopes at higher charge: σ_z on μ_z, R² 0.42 on rep2 fract7 fitted over the scan's
+        // whole charge range.
+        var (sigmaIntercept, sigmaSlope) = LeastSquares(gaussian
+            .Select(p => (GaussianChargeDistribution)p.Model.ChargeDistribution)
+            .Select(c => (X: c.MuZ, Y: c.SigmaZ))
+            .ToArray());
+
         var shapes = pairs
             .Where(p => p.Model.ChargeDistribution is GaussianChargeDistribution)
             .Select(p => new ShapeSample(
@@ -118,7 +253,38 @@ public sealed record IdOnlyPriors(
             .ToArray();
 
         return new IdOnlyPriors(rtOffset, aIntercept, aSlope, fallback, zIntercept, zChargeSlope, zBasicSlope, shapes, source,
-            sIntercept, sMassSlope, sNetBasicSlope);
+            sIntercept, sMassSlope, sNetBasicSlope, residueCharge, sigmaIntercept, sigmaSlope, AbundanceFromMaxIntensity: true);
+    }
+
+    /// <summary>
+    /// σ_z for a distribution centred on <paramref name="muZ"/>: the regression on μ_z when the priors
+    /// carry one, otherwise <paramref name="drawn"/>, the bootstrap draw.
+    /// </summary>
+    public double ChargeSigmaFor(double muZ, double drawn) =>
+        ChargeSigmaIntercept is { } a ? Math.Max(MinimumPredictedChargeSigma, a + ChargeSigmaMuSlope * muZ) : drawn;
+
+    /// <summary>
+    /// The charge-distribution centre predicted from mass and sequence alone: the residue-weighted
+    /// model when the priors carry one, otherwise √mass and net basic residues.
+    /// </summary>
+    public double SequenceChargeMu(IdentifiedSpecies species, bool useResidueWeights = true) =>
+        useResidueWeights && ResidueCharge is not null
+            ? ResidueCharge.Predict(species)
+            : SequenceChargeIntercept + SequenceChargeSqrtMassSlope * Math.Sqrt(species.Anchor.MonoisotopicMass)
+              + SequenceChargeNetBasicSlope * NetBasicResidueCount(species);
+
+    /// <summary>
+    /// A charge range that should hold the species' envelope without knowing its precursor charges:
+    /// the sequence-predicted centre ± <paramref name="sigmas"/> times the population's median σ_z,
+    /// widened in quadrature by the predictor's residual when the residue model is present.
+    /// </summary>
+    public (int Min, int Max) SequenceChargeRange(IdentifiedSpecies species, double sigmas = 3, int minCharge = 2, int maxCharge = 80)
+    {
+        double sigmaZ = Median(Shapes.Select(s => s.ChargeSigma));
+        double residual = ResidueCharge?.ResidualSd ?? 0;
+        double halfWidth = sigmas * Math.Sqrt(sigmaZ * sigmaZ + residual * residual);
+        double mu = SequenceChargeMu(species);
+        return (Math.Max(minCharge, (int)Math.Floor(mu - halfWidth)), Math.Min(maxCharge, (int)Math.Ceiling(mu + halfWidth)));
     }
 
     /// <summary>
@@ -138,22 +304,25 @@ public sealed record IdOnlyPriors(
 
         return species.Select(s =>
         {
-            double logIntensity = LogSummedPrecursorIntensity(s);
+            double logIntensity = AbundanceFromMaxIntensity ? LogMaxPrecursorIntensity(s) : LogSummedPrecursorIntensity(s);
             double logAbundance = double.IsFinite(logIntensity)
                 ? LogAbundanceIntercept + LogAbundanceSlope * logIntensity
                 : FallbackLogAbundance;
 
             var shape = Shapes[StableIndex(seed, s.Anchor.Identifier, Shapes.Length)];
-            double muZ = chargePredictor == ChargePredictor.ObservedCharges
-                ? ChargeMuIntercept + ChargeMuChargeSlope * MeanPrecursorCharge(s) + ChargeMuBasicSlope * BasicResidueCount(s)
-                : SequenceChargeIntercept + SequenceChargeSqrtMassSlope * Math.Sqrt(s.Anchor.MonoisotopicMass)
-                  + SequenceChargeNetBasicSlope * NetBasicResidueCount(s);
+            double muZ = chargePredictor switch
+            {
+                ChargePredictor.ObservedCharges =>
+                    ChargeMuIntercept + ChargeMuChargeSlope * MeanPrecursorCharge(s) + ChargeMuBasicSlope * BasicResidueCount(s),
+                ChargePredictor.ResidueWeights => SequenceChargeMu(s),
+                _ => SequenceChargeMu(s, useResidueWeights: false),
+            };
 
             return new ProteoformModel(
                 s.Anchor.MonoisotopicMass,
                 Math.Pow(10, logAbundance),
                 new EmgProfile(s.Anchor.RetentionTime + RtApexOffset, shape.RtSigma, shape.RtTau),
-                new GaussianChargeDistribution(muZ, shape.ChargeSigma),
+                new GaussianChargeDistribution(muZ, ChargeSigmaFor(muZ, shape.ChargeSigma)),
                 s.Anchor.Identifier);
         }).ToArray();
     }
@@ -170,6 +339,13 @@ public sealed record IdOnlyPriors(
     {
         double sum = species.Members.Sum(m => m.PrecursorIntensity is > 0 ? m.PrecursorIntensity.Value : 0);
         return sum > 0 ? Math.Log10(sum) : double.NaN;
+    }
+
+    /// <summary>log10 of the brightest member's precursor intensity, or NaN when none reported one.</summary>
+    public static double LogMaxPrecursorIntensity(IdentifiedSpecies species)
+    {
+        double max = species.Members.Max(m => m.PrecursorIntensity is > 0 ? m.PrecursorIntensity.Value : 0);
+        return max > 0 ? Math.Log10(max) : double.NaN;
     }
 
     public static double MeanPrecursorCharge(IdentifiedSpecies species) =>
@@ -190,7 +366,7 @@ public sealed record IdOnlyPriors(
     public static int NetBasicResidueCount(IdentifiedSpecies species) =>
         CountResidues(species, "KRH") - CountResidues(species, "DE");
 
-    private static int CountResidues(IdentifiedSpecies species, string residues)
+    internal static int CountResidues(IdentifiedSpecies species, string residues)
     {
         int count = 0, depth = 0;
         foreach (char c in species.Anchor.FullSequence)

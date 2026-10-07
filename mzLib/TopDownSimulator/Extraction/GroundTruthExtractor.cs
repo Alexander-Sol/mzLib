@@ -27,6 +27,25 @@ public sealed class GroundTruthExtractor
     private readonly double _ppmTolerance;
     private readonly double _mzWindowHalfWidth;
 
+    /// <summary>Lowest m/z any MS1 scan window covers; 0 when the scans carry no window.</summary>
+    public double MinScanMz { get; } = double.PositiveInfinity;
+
+    /// <summary>Highest m/z any MS1 scan window covers; infinite when the scans carry no window.</summary>
+    public double MaxScanMz { get; } = double.NegativeInfinity;
+
+    /// <summary>
+    /// The charges at which a species of <paramref name="monoisotopicMass"/> lands inside the scan
+    /// window: everything the extractor can see of its charge distribution.
+    /// </summary>
+    public (int Min, int Max) ObservableCharges(double monoisotopicMass, int minCharge = 2, int maxCharge = 80)
+    {
+        const double proton = 1.007276;
+        int lo = MaxScanMz > 0 && double.IsFinite(MaxScanMz)
+            ? (int)Math.Ceiling(monoisotopicMass / (MaxScanMz - proton)) : minCharge;
+        int hi = MinScanMz > proton ? (int)Math.Floor(monoisotopicMass / (MinScanMz - proton)) : maxCharge;
+        return (Math.Max(minCharge, lo), Math.Min(maxCharge, hi));
+    }
+
     public GroundTruthExtractor(
         MsDataScan[] scans,
         double ppmTolerance = 10.0,
@@ -52,7 +71,15 @@ public sealed class GroundTruthExtractor
             indices.Add(i);
             retentionTimes.Add(scans[i].RetentionTime);
             spectra.Add(scans[i].MassSpectrum);
+            if (scans[i].ScanWindowRange is { } window)
+            {
+                MinScanMz = Math.Min(MinScanMz, window.Minimum);
+                MaxScanMz = Math.Max(MaxScanMz, window.Maximum);
+            }
         }
+
+        if (MinScanMz > MaxScanMz)
+            (MinScanMz, MaxScanMz) = (0, double.PositiveInfinity);
 
         _ms1ScanIndices = indices.ToArray();
         _ms1RetentionTimes = retentionTimes.ToArray();

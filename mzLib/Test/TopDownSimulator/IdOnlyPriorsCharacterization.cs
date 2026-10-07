@@ -18,7 +18,9 @@ public class IdOnlyPriorsCharacterization
 {
     private const string PsmPath = @"D:\JurkatTopdown\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\02-18-20_jurkat_td_rep2_fract7_Proteoforms.psmtsv";
     private const string Stem = "02-18-20_jurkat_td_rep2_fract7";
-    private const string FittedPath = @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.full.v2.noisy.simulated.groundtruth.tsv";
+    /// <summary>The fitted export to characterise, by its output tag: MZLIB_TOPDOWN_SIM_FIT_TAG, ".v2" by default.</summary>
+    private static string FittedPath =>
+        $@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.full{(Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_FIT_TAG")?.Trim() is { Length: > 0 } t ? t : ".v2")}.noisy.simulated.groundtruth.tsv";
 
     private sealed record Joined(IdentifiedSpecies Species, double Mass, double Abundance,
         double RtMu, double RtSigma, double RtTau, double ChargeMu, double ChargeSigma);
@@ -62,6 +64,29 @@ public class IdOnlyPriorsCharacterization
         Regress("log10 max member precursor intensity", fit.Select(j => Log(j.Species.Members.Max(m => m.PrecursorIntensity ?? 0))), logA);
         Regress("log10 summed member precursor intensity", fit.Select(j => Log(j.Species.Members.Sum(m => m.PrecursorIntensity ?? 0))), logA);
         Regress("log10 member count", fit.Select(j => Math.Log10(j.Species.Members.Length)), logA);
+
+        // A precursor intensity is one charge state's share of the envelope; dividing by f(z) at that
+        // charge estimates the whole. Upper bound with the fitted f, then with the ID-only prediction.
+        var residue = global::TopDownSimulator.Prediction.ResidueChargeModel.Fit(fit.Select(j => j.Species).ToArray(), fit.Select(j => j.ChargeMu).ToArray());
+        var (sa, sb) = Line(fit.Select(j => j.ChargeMu).ToArray(), fit.Select(j => j.ChargeSigma).ToArray());
+        double PerCharge(Joined j, double mu, double sigma, Func<IEnumerable<double>, double> combine) =>
+            Log(combine(j.Species.Members.Where(m => m.PrecursorIntensity > 0)
+                .Select(m => m.PrecursorIntensity!.Value / new global::TopDownSimulator.Model.GaussianChargeDistribution(mu, sigma).Evaluate(m.PrecursorCharge))
+                .DefaultIfEmpty(0)));
+        double Pred(Joined j) => residue.Predict(j.Species);
+        double PredSigma(Joined j) => Math.Max(0.5, sa + sb * Pred(j));
+        Regress("log10 max I/f(z), fitted f", fit.Select(j => PerCharge(j, j.ChargeMu, j.ChargeSigma, v => v.Max())), logA);
+        Regress("log10 median I/f(z), fitted f", fit.Select(j => PerCharge(j, j.ChargeMu, j.ChargeSigma, Median)), logA);
+        Regress("log10 max I/f(z), predicted f", fit.Select(j => PerCharge(j, Pred(j), PredSigma(j), v => v.Max())), logA);
+        Regress("log10 median I/f(z), predicted f", fit.Select(j => PerCharge(j, Pred(j), PredSigma(j), Median)), logA);
+        Regress("log10 sum I/f(z), predicted f", fit.Select(j => PerCharge(j, Pred(j), PredSigma(j), v => v.Sum())), logA);
+        var withIntensity = fit.Where(j => j.Species.Members.Any(m => m.PrecursorIntensity > 0)).ToArray();
+        var logAi = withIntensity.Select(j => Math.Log10(j.Abundance)).ToArray();
+        double LogMax(Joined j) => Math.Log10(j.Species.Members.Max(m => m.PrecursorIntensity ?? 0));
+        Regress2("log10 max I + sqrt mass", withIntensity.Select(LogMax).ToArray(), withIntensity.Select(j => Math.Sqrt(j.Mass)).ToArray(), logAi);
+        Regress2("log10 max I + log10 predicted sigma_z", withIntensity.Select(LogMax).ToArray(), withIntensity.Select(j => Math.Log10(PredSigma(j))).ToArray(), logAi);
+        Regress2("log10 max I + log10 member count", withIntensity.Select(LogMax).ToArray(), withIntensity.Select(j => Math.Log10(j.Species.Members.Length)).ToArray(), logAi);
+        Regress2("log10 max I + log10 sum I", withIntensity.Select(LogMax).ToArray(), withIntensity.Select(j => Log(j.Species.Members.Sum(m => m.PrecursorIntensity ?? 0))).ToArray(), logAi);
         Report("log10 abundance (prior)", logA);
 
         // --- Charge ---
@@ -94,7 +119,20 @@ public class IdOnlyPriorsCharacterization
         Regress("K+R+H - D+E (net basic)", fit.Select(j => (double)(Basic(j, "KRH") - Basic(j, "DE"))), muZ);
         Regress2("sqrt mass + net basic",
             fit.Select(j => Math.Sqrt(j.Mass)).ToArray(), fit.Select(j => (double)(Basic(j, "KRH") - Basic(j, "DE"))).ToArray(), muZ);
+        RegressN("sqrt mass + K, R, H, D, E each", fit, muZ, j => new[] { Math.Sqrt(j.Mass) }.Concat("KRHDE".Select(c => (double)Basic(j, c.ToString()))));
+        RegressN("sqrt mass + K, R, H, D, E + N-term Ac", fit, muZ, j => new[] { Math.Sqrt(j.Mass) }
+            .Concat("KRHDE".Select(c => (double)Basic(j, c.ToString())))
+            .Append(j.Species.Anchor.FullSequence.StartsWith("[") ? 1.0 : 0.0));
+        RegressN("sqrt mass + K, R, H, D, E + length", fit, muZ, j => new[] { Math.Sqrt(j.Mass) }
+            .Concat("KRHDE".Select(c => (double)Basic(j, c.ToString()))).Append(Length(j)));
+        Console.WriteLine("  -- with precursor charges:");
+        RegressN("mean charge + sqrt mass + K, R, H, D, E", fit, muZ, j => new[] { j.Species.Members.Average(m => (double)m.PrecursorCharge), Math.Sqrt(j.Mass) }
+            .Concat("KRHDE".Select(c => (double)Basic(j, c.ToString()))));
+        RegressN("max charge + sqrt mass + K, R, H, D, E", fit, muZ, j => new[] { (double)j.Species.Members.Max(m => m.PrecursorCharge), Math.Sqrt(j.Mass) }
+            .Concat("KRHDE".Select(c => (double)Basic(j, c.ToString()))));
         Regress("charge sigma ~ K+R", fit.Select(j => (double)Basic(j, "KR")), fit.Select(j => j.ChargeSigma).ToArray());
+        Regress("charge sigma ~ sqrt mass", fit.Select(j => Math.Sqrt(j.Mass)), fit.Select(j => j.ChargeSigma).ToArray());
+        Regress("charge sigma ~ charge mu", fit.Select(j => j.ChargeMu), fit.Select(j => j.ChargeSigma).ToArray());
 
         // --- Shape priors ---
         Console.WriteLine();
@@ -133,6 +171,30 @@ public class IdOnlyPriorsCharacterization
         double rss = 0;
         for (int i = 0; i < n; i++) rss += Math.Pow(y[i] - (a0 + b1 * x1[i] + b2 * x2[i]), 2);
         Console.WriteLine($"  {label,-42} n={n,4}  y = {a0,8:F3} + {b1,7:F4} x1 + {b2,7:F4} x2   R2 {1 - rss / syy,6:F3}   resid sd {Math.Sqrt(rss / (n - 3)),7:F3}");
+    }
+
+    /// <summary>Least squares on any number of predictors, with an intercept, printing the coefficients and R².</summary>
+    private static void RegressN(string label, Joined[] rows, double[] y, Func<Joined, IEnumerable<double>> predictors)
+    {
+        var x = rows.Select(r => new[] { 1.0 }.Concat(predictors(r)).ToArray()).ToArray();
+        double[] beta = global::TopDownSimulator.Prediction.LinearLeastSquares.Solve(x, y);
+        double my = y.Average(), rss = 0, syy = 0;
+        for (int i = 0; i < y.Length; i++)
+        {
+            double f = x[i].Zip(beta, (a, b) => a * b).Sum();
+            rss += (y[i] - f) * (y[i] - f);
+            syy += (y[i] - my) * (y[i] - my);
+        }
+
+        Console.WriteLine($"  {label,-42} n={y.Length,4}  R2 {1 - rss / syy,6:F3}   resid sd {Math.Sqrt(rss / (y.Length - beta.Length)),7:F3}   " +
+                          $"coef [{string.Join(", ", beta.Select(b => b.ToString("F4")))}]");
+    }
+
+    private static (double Intercept, double Slope) Line(double[] x, double[] y)
+    {
+        double mx = x.Average(), my = y.Average();
+        double b = x.Zip(y, (a, c) => (a - mx) * (c - my)).Sum() / x.Sum(a => (a - mx) * (a - mx));
+        return (my - b * mx, b);
     }
 
     private static double Log(double? v) => v is > 0 ? Math.Log10(v.Value) : double.NaN;
