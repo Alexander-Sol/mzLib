@@ -171,5 +171,7 @@ Full list: `agent_info/TopDown-Simulator-Known-Issues.md`. The ones most likely 
   Also lists context "do not redo".
 - `TopDown-Simulator-Known-Issues.md`: the deferred defects and the test-suite baseline.
 - `TopDown-Simulator-Noise-Model.md`: noise measurements and model design. This file is untracked.
+- `TopDown-Simulator-Scan-Realism.md`: why simulated scans look noisier than real ones (centroid
+  sampling, abundance over-count, noise ∝ 1/IT, non-stationary density) and the scan comparison harness.
 - `TopDown-Simulator-Performance-Incident.md`: the apparent hang in `AnalysisExample` and its fixes.
 - `mzLib/TopDownSimulator/GlobalAbundanceRefitPlan.md`: the refit design.
