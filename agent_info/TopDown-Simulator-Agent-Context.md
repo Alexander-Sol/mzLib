@@ -76,8 +76,13 @@ The real-data entry points are `[Explicit]` tests in `mzLib/Test/FileReadingTest
 
 Behaviour is controlled with `MZLIB_TOPDOWN_SIM_*` environment variables, all read in
 `AnalysisExample.cs`: `MODE`, `NO_DEDUP`, `NO_GLOBAL_ABUNDANCE_REFIT`, `GLOBAL_REFIT_MAX_MODELS`,
-`CONSTANT_PEAK_WIDTH`, `MIN_SAMPLES_PER_SIGMA`, `PEAK_WIDTH_K`, `MASS_SHIFT_DA` and
-`NOISE_DENSITY_SCALE`.
+`CONSTANT_PEAK_WIDTH`, `MIN_SAMPLES_PER_SIGMA`, `PEAK_WIDTH_K`, `MASS_SHIFT_DA`,
+`NOISE_DENSITY_SCALE`, `NOISE_CONDITIONING` (`none`, `amplitude` or `full`, the default) and
+`OUTPUT_TAG` (appended to the export label so earlier exports are not overwritten; the scan
+realism harness reads the same tag).
+
+`GLOBAL_REFIT_MAX_MODELS` now defaults to 10000. It was 200 while building the refit basis was
+quadratic in model count; the basis now only visits models whose envelope reaches each sample.
 
 ## Hard-won facts — do not re-derive
 

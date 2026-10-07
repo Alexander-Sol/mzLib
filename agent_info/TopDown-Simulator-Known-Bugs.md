@@ -217,18 +217,23 @@ charge span rather than each model's own fitted range.
 
 - **Output is centroided mzML only.** IMSP is retired. mzLib's mzML reader throws on profile-mode
   files. See `agent_info/TopDown-Simulator-Status.md`.
-- **Centroids are generated directly** at theoretical isotopologue m/z
-  (`GridRasterizer.RasterizeAtCentroids`). There is no profile-grid-then-peak-pick step any more.
+- **Centroids are the local maxima of the summed profile** (`ProfileCentroider`, since
+  2026-10-07). Sampling at theoretical isotopologue m/z (`GridRasterizer.RasterizeAtCentroids`,
+  still in the code) wrote shoulder samples as peaks in crowded regions.
 - **The fitting path was optimized in `ea8196a8` and `bf36b4bc`.** `ForwardModelTests` pins the
   `Rasterize` optimization as bit-identical against a reference implementation — **keep that test
   passing**; it is the guard on that rewrite.
 - **Do not cache `IsotopeEnvelopeKernel` instances across threads.** Still true after the Bug 1 fix:
   `_centroidCacheByCharge` is a plain `Dictionary` mutated on the read path. Kernels are deliberately
   constructed per record so the parallel fit loop stays safe.
-- **The 200-model cap on the global refit is still needed.** *Building* the basis still evaluates
-  every model at every sample, so it remains quadratic in model count. The full q≤0.01 run (1087
-  models) still skips the refit entirely. Lifting the cap needs spatial pruning at build time — only
-  consider models whose RT and m/z ranges overlap the sample.
+- **The 200-model cap on the global refit is gone (2026-10-07).** Building the basis used to
+  evaluate every model at every sample. `GlobalAbundanceRefitter.ModelMzIndex` now restricts each
+  sample to the (model, charge) envelopes that reach its m/z. The pruning is exact: the kernel is
+  exactly 0 outside its window, and candidates keep the old summation order. The default cap in
+  `AnalysisExample` is now 10000.
+- **Centroids are now picked, not sampled (2026-10-07).** `ProfileCentroider` replaced
+  `RasterizeAtCentroids` in `Simulator.SimulateCentroided`. See
+  `TopDown-Simulator-Scan-Realism.md`.
 - **Three tests fail on this machine for unrelated reasons**: `ControlXIC`, `Ms1Example` and
   `Ms2LogExample` hardcode `D:\Human_Ecoli_TwoProteome_60minGradient\...`, which does not exist here,
   and call Plotly `.Show()`. They are not `[Explicit]` but they are not runnable without that data.

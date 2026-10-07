@@ -94,13 +94,42 @@ The model emits 17k in every scan. After peak picking, this is what still clutte
 177 simulated peaks against 72 real. Pre-elution scans are about 50× too dense. The calibration window
 (50–55 min) is the densest part of the run, so it is not representative.
 
-## Open next steps
+## What was done (2026-10-07)
 
-1. Move peak picking into the library centroid path, replacing union sampling plus summing collapse. Check
-   what `FeatureGroundTruth` assumes about the centroid axis first.
-2. Make the noise level per scan from IT. The real IT is available because the simulation reuses the real
-   scan grid; an AGC model driven by the simulated TIC is the forward-model alternative.
-3. Make the noise density per scan. It needs a measurement first, e.g. a per-scan count of the noise-like
-   peaks (charge 0, low S/N), and against what it scales.
-4. Fitting: refit in RT blocks so 1087 models fit under the cap, and deduplicate by mass rather than by
-   (accession, sequence, charge).
+| Commit | Change |
+|---|---|
+| `eefc593` | `ProfileCentroider`: one centroid per local maximum of the summed profile, Newton-polished so the height is the forward model at the maximum. Feature truth snaps apex m/z to the apex scan's own peaks. |
+| `0719ddc3` | The refit basis is built through an exact m/z index of (model, charge) envelopes, so the 200-model cap is gone (default 10000). Records are grouped into species (0.5 min, 0 to ±3 isotope spacings within 0.03 Da) and fitted once, over every member's charge ± 2. |
+| `4e265786` | `ScanNoiseConditions.FromSourceScans`: one noise model per scan, with amplitude `JurkatNoiseTimesInjectionTime` / IT and per-bin density counted from the source scan's peaks under S/N 10. |
+
+**Density is conditioned on the source, not predicted.** `NoiseDensityAcrossRun` shows noise-like peak
+counts follow neither IT nor TIC: about 350 per scan pre-elution and 17k in the wash, both at the 50 ms
+maximum, and the m/z shape changes too. Most of it is presumably faint unidentified analyte and background.
+
+The full rep2 export with all of this ran as `MZLIB_TOPDOWN_SIM_OUTPUT_TAG=.v2`:
+
+- 1089 records grouped into 474 species, and the refit over 473 models took 25 s;
+- the unexplained energy fell from 0.72 to 0.45;
+- the whole export took 72 s and is 427 MB;
+- it averages 7058 peaks per scan, against 7210 real.
+
+Harness, `file` rows, before (`full`) → after (`full.v2`):
+
+| scan / region | peaks (real) | sim matched | √cos | TIC ratio | KS |
+|---|---|---|---|---|---|
+| 2534, 860.4–864.4 | 251 → 88 (72) | 0.28 → 0.72 | 0.76 → 0.94 | 152 → 1.26 | 0.42 → 0.20 |
+| 2534, whole scan | 20576 → 8137 (8222) | 0.22 → 0.33 | 0.61 → 0.61 | 60 → 1.14 | 0.89 → 0.15 |
+| 1840, whole scan | 17228 → 11417 (11565) | 0.27 → 0.35 | 0.25 → 0.29 | 0.42 → 1.08 | 0.99 → 0.18 |
+| 1200, pre-elution | 16969 → 359 (344) | – | – | 503 → 5.0 | – |
+| 3680, wash | 16941 → 16985 (17134) | – | – | 1.75 → 1.07 | – |
+
+## Still open
+
+- **Busy scans are mostly unidentified analyte.** In scan 1840 only 25 simulated signal peaks clear the
+  floor; the real scan's structure (cos 0.19) is analyte the simulation renders as unstructured noise.
+  Only identified proteoforms are simulated.
+- **The level's m/z shape is the wash shape.** Busy scans rise only about 2× from m/z 650 to 1150, against
+  about 3.8× in the model, so the floor above m/z 1000 sits too high there.
+- **Pre-elution TIC is about 5× real.** Empty scans have amplitude × IT ≈ 9e3, not 2e4. The S/N 10
+  counting window makes the sampled noise a little bright there.
+- **The refit still reports `converged: false`** (see Known-Bugs).
