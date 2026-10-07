@@ -86,8 +86,18 @@ realism harness reads the same tag). The current exports are `.v3`; see
 `TopDown-Simulator-IdOnly.md` for why the charge window changed.
 
 The ID-only harness (`Test/TopDownSimulator/IdOnlySimulation.cs`) reads `FIT_TAG` (the fitted
-export to train and score against, `.v2` by default), `IDONLY_TEMPLATE` (`train` or `self`) and
-`IDONLY_CHARGE` (`residue`, the default, `sequence` or `observed`).
+export to train and score against, `.v2` by default), `IDONLY_TEMPLATE` (`train` or `self`),
+`IDONLY_CHARGE` (`residue`, the default, `sequence` or `observed`) and `IDONLY_HELDOUT`
+(`rep1-fract7`, the default, `rep2-fract6` or `rep2-fract5`). Template-free simulation
+(`AcquisitionProfile`, `AutomaticGainControl`, `UnidentifiedAnalytes`) is described in
+`TopDown-Simulator-IdOnly.md`.
+
+### Most of a busy scan's TIC is below S/N 10
+In rep2 fract7, 30–50 min, only ~18 % of the TIC is in peaks at S/N ≥ 10 (S/N against
+2·10⁴/IT). The rest is what the per-scan noise density carries. The density curve over RT is a
+property of the gradient and is the same across fractions. AGC holds IT·TIC ≈ 1.1–1.3·10⁹ in every
+run. The median centroid intensity is **not** a noise level: centroids are already thresholded local
+maxima.
 
 `GLOBAL_REFIT_MAX_MODELS` now defaults to 10000. It was 200 while building the refit basis was
 quadratic in model count; the basis now only visits models whose envelope reaches each sample.

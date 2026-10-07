@@ -225,7 +225,7 @@ public class IdOnlySimulation
             ("fitted (upper bound)", ReadMs1(FittedMzml(TestStem))),
         };
         foreach (var charge in ChargePredictors)
-        foreach (string template in new[] { "self", "train" })
+        foreach (string template in new[] { "self", "train", "notemplate" })
             if (File.Exists(IdOnlyMzml(template, charge)))
                 simulations.Add(($"ids, {template}{ChargeSuffix(charge)}", ReadMs1(IdOnlyMzml(template, charge))));
 
@@ -426,6 +426,152 @@ public class IdOnlySimulation
         {
             var cos = list.Select(x => x.Cosine).OrderBy(x => x).ToArray();
             Console.WriteLine($"  {label,-24} {cos[cos.Length / 2],11:F3} {cos[cos.Length / 4],8:F3} {list.Count(x => x.ApexWithinOne) / (double)list.Count,14:P0}");
+        }
+    }
+
+    private static string AcquisitionProfilePath => $@"{Dir}\acquisition-profile.{TrainStem}.json";
+    private static string UnidentifiedPath => $@"{Dir}\unidentified.{TrainStem}{DerivedTag}.json";
+
+    /// <summary>
+    /// Calibrates the unidentified-analyte component on rep2: renders rep2's fitted models plus
+    /// <see cref="UnidentifiedAnalytes"/> drawn from them, without noise, on every 5th MS1 scan from
+    /// 30 to 50 min, and picks the count and abundance shift whose summed TIC and number of peaks at
+    /// S/N ≥ 10 (against each real scan's injection-time noise) best match the real scans.
+    /// Also learns and saves the <see cref="AcquisitionProfile"/>.
+    /// </summary>
+    [Test]
+    [Explicit("Calibrates unidentified analytes and learns the acquisition profile on rep2 fract7")]
+    public static void CalibrateTemplateFreeModel()
+    {
+        var real = ReadMs1(RawPath(TrainStem));
+        var profile = AcquisitionProfile.Learn(real, TrainStem);
+        profile.Save(AcquisitionProfilePath);
+        Console.WriteLine($"AGC: IT = min({profile.Agc.MaxInjectionTime:F0}, {profile.Agc.ChargeTarget:G3} / (TIC + {profile.Agc.BackgroundTic:G2})), load below S/N 10 = {profile.DimLoadRatio:F2} x load above; " +
+                          $"{profile.ScanTimes().Length} scan times from the profile against {real.Length} real; wrote {AcquisitionProfilePath}");
+
+        var (fitted, minZ, maxZ, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
+        var sample = real.Where(s => s.RetentionTime is >= 30 and <= 50).Where((_, i) => i % 5 == 0).ToArray();
+        double[] times = sample.Select(s => s.RetentionTime).ToArray();
+        var noise = sample.Select(s => new NoiseFloorModel(NoiseFloorModel.JurkatNoiseTimesInjectionTime / (s.InjectionTime ?? 50))).ToArray();
+        int RealBright(int i) => SignalPeaks.Select(sample[i].MassSpectrum.XArray, sample[i].MassSpectrum.YArray, noise[i], 10, 600, 2000).Mz.Length;
+        var realBright = Enumerable.Range(0, sample.Length).Select(RealBright).ToArray();
+
+        // Where the real TIC sits: above or below S/N 10, against what the noise model would put there.
+        var realBrightTic = Enumerable.Range(0, sample.Length).Select(i =>
+            SignalPeaks.Select(sample[i].MassSpectrum.XArray, sample[i].MassSpectrum.YArray, noise[i], 10, 600, 2000).Intensity.Sum()).ToArray();
+        var sourceNoise = ScanNoiseConditions.FromSourceScans(sample, new NoiseFloorModel());
+        var rng = new Random(1);
+        var modelNoiseTic = sourceNoise.Select(m =>
+        {
+            var peaks = new List<SimulatedPeak>();
+            m.SampleScan(rng, peaks);
+            return peaks.Sum(p => p.Intensity);
+        }).ToArray();
+        Console.WriteLine($"real TIC median {Median(sample.Select(s => s.MassSpectrum.SumOfAllY)):G3}; at S/N >= 10 {Median(realBrightTic):G3}; " +
+                          $"noise model sampled on each scan's own density {Median(modelNoiseTic):G3}; real bright peaks {Median(realBright.Select(b => (double)b)):F0}");
+
+        var simulator = new Simulator();
+        (double LogTic, double LogCount) Score(int count, double shift)
+        {
+            var background = new UnidentifiedAnalytes(count, shift).Draw(fitted, real[0].RetentionTime, real[^1].RetentionTime, seed: 1);
+            var scans = simulator.SimulateCentroided(fitted.Concat(background).ToArray(), minZ, maxZ, width, times).Scans;
+            var selected = Enumerable.Range(0, sample.Length)
+                .Select(i => SignalPeaks.Select(scans[i].MassSpectrum.XArray, scans[i].MassSpectrum.YArray, noise[i], 10, 600, 2000)).ToArray();
+            var tic = Enumerable.Range(0, sample.Length).Select(i => Math.Log10((1 + selected[i].Intensity.Sum()) / (1 + realBrightTic[i]))).ToArray();
+            var bright = Enumerable.Range(0, sample.Length).Select(i => Math.Log10((1 + selected[i].Mz.Length) / (1.0 + realBright[i]))).ToArray();
+            return (Median(tic), Median(bright));
+        }
+
+        // Below S/N 10 the acquisition profile's density curve already carries the load: it was
+        // measured as every peak under S/N 10, unidentified analytes included. So the unidentified
+        // component is calibrated on the bright part of the spectrum only.
+        Console.WriteLine($"{sample.Length} scans, 30-50 min; median log10(sim/real) of the TIC and the number of peaks at S/N >= 10:");
+        var best = (Count: 0, Shift: 0.0, Error: double.PositiveInfinity);
+        foreach (int count in new[] { 0, 500, 1000, 2000, 4000, 8000 })
+        foreach (double shift in count == 0 ? new[] { 0.0 } : new[] { -2.0, -1.5, -1.0, -0.5, 0.0 })
+        {
+            var (tic, bright) = Score(count, shift);
+            double error = tic * tic + bright * bright;
+            Console.WriteLine($"  count {count,5} shift {shift,5:F1}:  TIC {tic,6:F3}  bright peaks {bright,6:F3}");
+            if (error < best.Error) best = (count, shift, error);
+        }
+
+        var chosen = new UnidentifiedAnalytes(best.Count, best.Shift);
+        File.WriteAllText(UnidentifiedPath, System.Text.Json.JsonSerializer.Serialize(chosen));
+        Console.WriteLine($"chosen {chosen}; wrote {UnidentifiedPath}");
+    }
+
+    /// <summary>
+    /// Simulates the held-out run from its identifications with no template run at all: scan times
+    /// and noise density from the rep2 acquisition profile, noise amplitude from AGC on the simulated
+    /// ion load, and unidentified analytes calibrated on rep2. Run
+    /// <see cref="CalibrateTemplateFreeModel"/> first. Written as the <c>notemplate</c> template.
+    /// </summary>
+    [Test]
+    [Explicit("Simulates the held-out run from IDs only, without any template run")]
+    public static void SimulateHeldOutWithoutTemplate()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var priors = IdOnlyPriors.Load(PriorsPath);
+        var profile = AcquisitionProfile.Load(AcquisitionProfilePath);
+        var unidentified = System.Text.Json.JsonSerializer.Deserialize<UnidentifiedAnalytes>(File.ReadAllText(UnidentifiedPath))!;
+        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var models = priors.Predict(species, chargePredictor: Charge);
+        var (fitted, _, _, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
+        double[] scanTimes = profile.ScanTimes();
+        var background = unidentified.Draw(fitted, scanTimes[0], scanTimes[^1], seed: 1);
+
+        var charges = models.Concat(background).Select(m => (GaussianChargeDistribution)m.ChargeDistribution).ToArray();
+        int minZ = Math.Max(2, (int)Math.Floor(charges.Min(c => c.MuZ - 3 * c.SigmaZ)));
+        int maxZ = Math.Min(80, (int)Math.Ceiling(charges.Max(c => c.MuZ + 3 * c.SigmaZ)));
+        Console.WriteLine($"species {species.Length}, unidentified {background.Length} ({unidentified}), charges {minZ}-{maxZ}, {scanTimes.Length} scans");
+
+        var template = new NoiseFloorModel();
+        var export = new Simulator().WriteMzml(
+            models, minZ, maxZ, width, scanTimes, IdOnlyMzml("notemplate", Charge),
+            background: background, scanNoiseFromSignal: scans => profile.NoiseModels(scans, template));
+
+        Console.WriteLine($"wrote {export.MzmlPath}: {export.ScanCount} scans, {export.PeakCount / (double)export.ScanCount:F0} peaks/scan, " +
+                          $"{export.FeatureCount} features, total {sw.Elapsed}");
+    }
+
+    /// <summary>
+    /// Splits the no-template simulation's ion load by source on every 10th held-out MS1 scan from 30
+    /// to 50 min: the rendered signal (identified, unidentified), the injection time AGC gives it, and
+    /// the noise that follows, against the real scan's TIC, bright TIC and injection time.
+    /// </summary>
+    [Test]
+    [Explicit("Diagnoses the no-template simulation's ion load against the held-out run")]
+    public static void DiagnoseTemplateFreeLoad()
+    {
+        var real = ReadMs1(RawPath(TestStem)).Where(s => s.RetentionTime is >= 30 and <= 50).Where((_, i) => i % 10 == 0).ToArray();
+        var priors = IdOnlyPriors.Load(PriorsPath);
+        var profile = AcquisitionProfile.Load(AcquisitionProfilePath);
+        var unidentified = System.Text.Json.JsonSerializer.Deserialize<UnidentifiedAnalytes>(File.ReadAllText(UnidentifiedPath))!;
+        var species = SpeciesGrouper.Group(new MmResultLoader().LoadQualified(PsmPath(TestStem), TestStem, QValue));
+        var models = priors.Predict(species, chargePredictor: Charge);
+        var (fitted, _, _, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
+        var background = unidentified.Draw(fitted, profile.FirstScanTime, profile.LastScanTime, seed: 1);
+        double[] times = real.Select(s => s.RetentionTime).ToArray();
+
+        var simulator = new Simulator();
+        var identifiedScans = simulator.SimulateCentroided(models, 2, 47, width, times).Scans;
+        var backgroundScans = simulator.SimulateCentroided(background, 2, 47, width, times).Scans;
+        var allScans = simulator.SimulateCentroided(models.Concat(background).ToArray(), 2, 47, width, times).Scans;
+        var noise = profile.NoiseModels(allScans);
+        var rng = new Random(1);
+
+        Console.WriteLine($"  {"RT",5} {"real TIC",9} {"real >10",9} {"real IT",7} | {"ident",9} {"unident",9} {"sim IT",7} {"noise TIC",9} {"sim >10",9}");
+        for (int i = 0; i < real.Length; i++)
+        {
+            var realNoise = new NoiseFloorModel(NoiseFloorModel.JurkatNoiseTimesInjectionTime / (real[i].InjectionTime ?? 50));
+            double realBright = SignalPeaks.Select(real[i].MassSpectrum.XArray, real[i].MassSpectrum.YArray, realNoise, 10).Intensity.Sum();
+            double simBright = SignalPeaks.Select(allScans[i].MassSpectrum.XArray, allScans[i].MassSpectrum.YArray, realNoise, 10).Intensity.Sum();
+            var peaks = new List<SimulatedPeak>();
+            noise[i].SampleScan(rng, peaks);
+            double simIt = NoiseFloorModel.JurkatNoiseTimesInjectionTime / noise[i].NoiseLevelAtReferenceMz;
+            Console.WriteLine($"  {real[i].RetentionTime,5:F1} {real[i].MassSpectrum.SumOfAllY,9:G3} {realBright,9:G3} {real[i].InjectionTime,7:F1} | " +
+                              $"{identifiedScans[i].MassSpectrum.SumOfAllY,9:G3} {backgroundScans[i].MassSpectrum.SumOfAllY,9:G3} {simIt,7:F1} {peaks.Sum(p => p.Intensity),9:G3} {simBright,9:G3}");
         }
     }
 

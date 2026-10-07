@@ -161,6 +161,15 @@ public sealed class Simulator
     /// One noise model per scan, replacing <paramref name="noise"/>, for a floor whose amplitude and
     /// density follow the run. Build it with <see cref="ScanNoiseConditions.FromSourceScans"/>.
     /// </param>
+    /// <param name="background">
+    /// Proteoforms rendered into the spectra but left out of both sidecars: analytes the instrument
+    /// saw that no identification accounts for. A benchmark is not scored on finding them.
+    /// </param>
+    /// <param name="scanNoiseFromSignal">
+    /// Builds the per-scan noise models from the rendered signal scans, before noise is added, for a
+    /// floor that follows the simulated ion load (see <see cref="AutomaticGainControl"/>). Replaces
+    /// <paramref name="scanNoise"/>.
+    /// </param>
     public SimulationExportResult WriteMzml(
         IReadOnlyList<ProteoformModel> proteoforms,
         int minCharge,
@@ -174,13 +183,17 @@ public sealed class Simulator
         NoiseFloorModel? noise = null,
         int noiseSeed = 0,
         PeakJitterModel? jitter = null,
-        IReadOnlyList<NoiseFloorModel>? scanNoise = null)
+        IReadOnlyList<NoiseFloorModel>? scanNoise = null,
+        IReadOnlyList<ProteoformModel>? background = null,
+        Func<MsDataScan[], IReadOnlyList<NoiseFloorModel>>? scanNoiseFromSignal = null)
     {
         if (string.IsNullOrWhiteSpace(outputPath))
             throw new ArgumentException("An output path is required.", nameof(outputPath));
 
+        var rendered = background is { Count: > 0 } ? proteoforms.Concat(background).ToArray() : proteoforms;
         var prepared = PrepareMs1(
-            proteoforms, minCharge, maxCharge, widthModel, scanTimes, reduction, noise, noiseSeed, jitter, scanNoise);
+            rendered, minCharge, maxCharge, widthModel, scanTimes, reduction, noise, noiseSeed, jitter, scanNoise,
+            scanNoiseFromSignal);
 
         var scans = prepared.Ms1Scans;
         var scanNumbers = new int[scans.Length];
@@ -311,12 +324,15 @@ public sealed class Simulator
         NoiseFloorModel? noise = null,
         int noiseSeed = 0,
         PeakJitterModel? jitter = null,
-        IReadOnlyList<NoiseFloorModel>? scanNoise = null)
+        IReadOnlyList<NoiseFloorModel>? scanNoise = null,
+        Func<MsDataScan[], IReadOnlyList<NoiseFloorModel>>? scanNoiseFromSignal = null)
     {
+        var simulation = SimulateCentroided(proteoforms, minCharge, maxCharge, widthModel, scanTimes);
+        if (scanNoiseFromSignal is not null)
+            scanNoise = scanNoiseFromSignal(simulation.Scans);
+
         if (scanNoise is not null && scanNoise.Count != scanTimes.Length)
             throw new ArgumentException("There must be one noise model per scan.", nameof(scanNoise));
-
-        var simulation = SimulateCentroided(proteoforms, minCharge, maxCharge, widthModel, scanTimes);
 
         reduction ??= new ScanReductionOptions();
         if (noise is not null && scanNoise is null && reduction.Floor is null)

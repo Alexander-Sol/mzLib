@@ -300,6 +300,82 @@ Set `MZLIB_TOPDOWN_SIM_IDONLY_HELDOUT=rep2-fract6` (or `rep2-fract5`) and `FIT_T
   unidentified load. A template from another fraction carries the wrong load.
 - **Conclusion:** step 4 is necessary, not optional.
 
+## Without a template run
+
+Run in order, with `FIT_TAG=.v3`: `CalibrateTemplateFreeModel` (on rep2 fract7), then
+`SimulateHeldOutWithoutTemplate` (template label `notemplate`), then `CompareHeldOut`. To split one
+run's load by source, scan by scan, use `DiagnoseTemplateFreeLoad`. The measurements behind the model
+are in `AgcCharacterization.CharacterizeAcquisition`, over rep2 fract7, rep1 fract7 and rep2 fract6.
+
+**What the acquisition does** (the same in all three runs):
+
+- **AGC:** IT = min(50 ms, c / TIC) with c = 1.17, 1.29 and 1.20·10⁹, missing IT by 0.14–0.18 dex
+  RMS. Half the MS1 scans sit at the 50 ms cap. Thermo intensities are per unit IT, so IT·TIC is
+  roughly constant (median 1.1·10⁹) wherever AGC is active.
+- **MS1 cadence:** 1.7 s, stretching to 2.4–3.2 s in the busy region as MS2 scans multiply.
+- **Noise density:** follows neither the bright load (R² 0.02–0.10) nor TIC (0.32–0.40). Its RT
+  curve is nearly identical across the three runs: ~400 peaks per scan before elution, about 11 000
+  in the busy region and 16–17 000 in the wash. It is a property of the gradient.
+- **Where the load sits:** most of the TIC is below S/N 10. In rep2 30–50 min the median TIC is
+  5.2·10⁸, of which only 0.95·10⁸ is at S/N ≥ 10. The noise model, sampled on each scan's own
+  measured density, reproduces the rest (5.4·10⁸). The load below S/N 10 grows with the bright
+  load: log-log slope 0.5–0.6, ratio 2–4.6 in the busy region.
+
+**The model** (`TopDownSimulator/Noise/AcquisitionProfile.cs`,
+`Prediction/UnidentifiedAnalytes.cs`, and `Simulator.WriteMzml`'s `background` and
+`scanNoiseFromSignal`):
+
+- **Learned from rep2 fract7:** the MS1 interval and the noise density per 1-min RT bin; the AGC
+  cap, the target and the load ratio below/above S/N 10 (median 0.95 over the AGC-active scans).
+- **Scan times:** generated from the interval curve (2962, against 2906 real).
+- **Unidentified analytes:** copies of rep2's fitted models with mass (σ 15 %), RT (σ 1 min) and
+  log abundance moved. They are rendered into the mzML but written to neither sidecar.
+- **Calibration:** on rep2 30–50 min, count and abundance shift are chosen so that the simulated
+  TIC and number of peaks at S/N ≥ 10 match the real scans. Below S/N 10 the density curve already
+  carries the load. Result: 2000 species at −1.0 dex (σ 0.5 dex). With an RT σ of 3 min, the
+  calibration picked 4000 at −1.5, but the species spilled into empty stretches of the gradient.
+- **Per-scan noise:** the IT that AGC sets for (1 + 0.95) × the rendered signal's TIC gives the
+  amplitude; the density comes from the RT curve.
+
+`DiagnoseTemplateFreeLoad` on rep1 shows the mechanism working scan by scan. Simulated IT tracks
+the real IT: 0.5 against 0.5 ms at 33.4 min, 0.3 against 0.3 at 41.1, 4.2 against 3.7 at 46.4. Signal
+plus noise TIC lands near the real TIC.
+
+**Scored against the held-out runs** (`notemplate` against the templates above):
+
+| | rep1 fract7 `notemplate` | rep1 `train` | rep2 fract6 `notemplate` | fract6 `train` |
+|---|---|---|---|---|
+| whole-run log TIC r | 0.870 | 0.971 | 0.862 | 0.966 |
+| whole-run TIC ratio | 1.25 | 0.98 | **0.68** | 0.45 |
+| peak ratio / peaks-per-scan r | 0.99 / 0.980 | 0.97 / 0.990 | 0.92 / 0.971 | 0.91 / 0.968 |
+| S/N ≥ 10 count ratio, 30–50 min | 2.21 | 1.21 | **0.37** | 0.26 |
+| S/N ≥ 10 TIC ratio, 30–50 min | 2.93 | 1.33 | 0.22 | 0.15 |
+| envelope cos (per species) | 0.793 | 0.825 | 0.843 | 0.863 |
+| apex charge within 1 | 64 % | 66 % | 58 % | 63 % |
+
+**Reading it:**
+
+- **Across fractions, no template beats a foreign template**, because the ion load now follows the
+  simulated sample. On fract6 the TIC ratio goes from 0.45 to 0.68 and the bright-peak count from 0.26
+  to 0.37.
+- **Within a fraction, the matched template is still better.** On rep1 the TIC trace correlates less
+  well (0.87 against 0.97), and the busy region carries about 2× too many bright peaks.
+- **Two causes are visible:**
+  - The calibration renders signal without noise, so it misses the noise's own tail above S/N 10.
+    The fitted simulation shows that tail too, as a count ratio of 1.38.
+  - The unidentified analytes are placed by resampling the fitted species' RTs. The bright real load
+    has its own RT structure, such as the 15–20 min early eluters, which only the template carries.
+- **Fract6 is under-loaded:** its busy region is 0.3–0.5 dex brighter than fract7's (log TIC 9.4–9.75
+  against 8.9–9.3). The unidentified load was calibrated on fract7.
+- **Per-species envelopes worsen slightly** (0.825 → 0.793 on rep1), because the unidentified
+  species overlap the identified ones' extraction windows.
+
 ## Next
 
-1. An unidentified-analyte component and an AGC model in place of the template (step 4 of the plan).
+1. Calibrate the unidentified component with the noise injected, so its tail above S/N 10 counts.
+2. Scale the unidentified load with the identified load per RT window instead of resampling fitted
+   RTs: the identified signal is the only sample-specific evidence of how loaded a region is.
+   Fract6's busy region is brighter in identified and unidentified signal alike.
+3. Recover the abundance predictor's top end (H2A at 41.1 min is predicted 0.2–0.7 dex low): the
+   regression compresses the range, and the cross-search offset (Classic vs IsoDec precursor
+   intensities, −0.14 dex) needs a per-search calibration.
