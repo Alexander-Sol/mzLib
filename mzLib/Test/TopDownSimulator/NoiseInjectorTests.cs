@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using MassSpectrometry;
 using MzLibUtil;
@@ -241,7 +242,8 @@ public class NoiseInjectorTests
     [Test]
     public void ConstructorRejectsMissingArguments()
     {
-        Assert.Throws<ArgumentNullException>(() => new NoiseInjector(null!, Width));
+        Assert.Throws<ArgumentNullException>(() => new NoiseInjector((NoiseFloorModel)null!, Width));
+        Assert.Throws<ArgumentNullException>(() => new NoiseInjector((IReadOnlyList<NoiseFloorModel>)null!, Width));
         Assert.Throws<ArgumentNullException>(() => new NoiseInjector(new NoiseFloorModel(), null!));
         Assert.Throws<ArgumentOutOfRangeException>(() => new NoiseInjector(new NoiseFloorModel(), Width, mergeWithinSigmas: -1));
     }

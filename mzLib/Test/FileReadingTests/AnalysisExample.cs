@@ -706,6 +706,7 @@ namespace Test.FileReadingTests
             string stem = Path.GetFileNameWithoutExtension(rawPath);
             string outDir = Path.GetDirectoryName(rawPath)!;
 
+            label += GetOutputTag();
             string cleanPath = Path.Combine(outDir, $"{stem}.{label}.clean.simulated.mzML");
             string noisyPath = Path.Combine(outDir, $"{stem}.{label}.noisy.simulated.mzML");
 
@@ -763,13 +764,21 @@ namespace Test.FileReadingTests
             var noise = new NoiseFloorModel(
                 noiseLevelAtReferenceMz: measuredNoiseLevel,
                 densityScale: densityScale);
-            Console.WriteLine($"Noise model: level {measuredNoiseLevel} at m/z {NoiseFloorModel.ReferenceMz}, " +
-                              $"density scale {densityScale}, {noise.ExpectedPeaksPerScan:F0} peaks/scan expected");
+            var conditioning = GetNoiseConditioning();
+            var scanNoise = conditioning == NoiseConditioning.None
+                ? null
+                : ScanNoiseConditions.FromSourceScans(
+                    windowScans, noise, conditionDensity: conditioning == NoiseConditioning.Full);
+            Console.WriteLine(scanNoise is null
+                ? $"Noise model: level {measuredNoiseLevel} at m/z {NoiseFloorModel.ReferenceMz}, " +
+                  $"density scale {densityScale}, {noise.ExpectedPeaksPerScan:F0} peaks/scan expected"
+                : $"Noise model: conditioned per scan ({conditioning}) on the source scans, density scale {densityScale}, " +
+                  $"{scanNoise.Average(m => m.ExpectedPeaksPerScan):F0} peaks/scan expected on average");
 
             stageSw.Restart();
             var noisy = simulator.WriteMzml(
                 models, allFits.MinCharge, allFits.MaxCharge, allFits.WidthModel, scanTimes, noisyPath,
-                noise: noise);
+                noise: noise, scanNoise: scanNoise);
             Console.WriteLine($"Noisy mzML: {noisyPath}");
             Console.WriteLine($"  scans {noisy.ScanCount}, peaks {noisy.PeakCount} " +
                               $"({noisy.PeakCount / (double)noisy.ScanCount:F0}/scan), " +
@@ -1085,6 +1094,32 @@ namespace Test.FileReadingTests
 
             return double.TryParse(raw, out double parsed) && parsed >= 0 ? parsed : 1.0;
         }
+
+        private enum NoiseConditioning { None, Amplitude, Full }
+
+        /// <summary>
+        /// How the injected noise follows the source run. <c>full</c> (the default) takes each
+        /// scan's amplitude from its injection time and its density from its own low-S/N peaks;
+        /// <c>amplitude</c> conditions only the amplitude; <c>none</c> uses one model for every
+        /// scan, as before. Set with MZLIB_TOPDOWN_SIM_NOISE_CONDITIONING.
+        /// </summary>
+        private static NoiseConditioning GetNoiseConditioning()
+        {
+            var raw = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_NOISE_CONDITIONING");
+            return raw?.Trim().ToLowerInvariant() switch
+            {
+                "none" => NoiseConditioning.None,
+                "amplitude" => NoiseConditioning.Amplitude,
+                _ => NoiseConditioning.Full,
+            };
+        }
+
+        /// <summary>
+        /// Appended to the output label, e.g. ".v2", so a new export does not overwrite one that
+        /// downstream results were computed from. Set with MZLIB_TOPDOWN_SIM_OUTPUT_TAG.
+        /// </summary>
+        private static string GetOutputTag() =>
+            Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_OUTPUT_TAG")?.Trim() ?? string.Empty;
 
         private static MmResultRecord[] LoadQualifiedMmRecords(
             string psmTsvPath,

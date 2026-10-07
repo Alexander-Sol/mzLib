@@ -51,12 +51,26 @@ public static class SimulatedScanReducer
             throw new ArgumentNullException(nameof(scans));
 
         var floor = ComputeFloor(scans, options);
+        var floors = new IIntensityFloor[scans.Length];
+        Array.Fill(floors, floor);
+        return Reduce(scans, floors);
+    }
+
+    /// <summary>Thresholds scan s against <paramref name="scanFloors"/>[s].</summary>
+    public static MsDataScan[] Reduce(MsDataScan[] scans, IReadOnlyList<IIntensityFloor> scanFloors)
+    {
+        if (scans is null)
+            throw new ArgumentNullException(nameof(scans));
+        if (scanFloors is null)
+            throw new ArgumentNullException(nameof(scanFloors));
+        if (scanFloors.Count != scans.Length)
+            throw new ArgumentException("There must be one floor per scan.", nameof(scanFloors));
 
         var reduced = new MsDataScan[scans.Length];
         for (int s = 0; s < scans.Length; s++)
         {
             var scan = scans[s];
-            var (mz, intensities) = Threshold(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray, floor);
+            var (mz, intensities) = Threshold(scan.MassSpectrum.XArray, scan.MassSpectrum.YArray, scanFloors[s]);
             reduced[s] = CloneWithSpectrum(scan, mz, intensities);
         }
 

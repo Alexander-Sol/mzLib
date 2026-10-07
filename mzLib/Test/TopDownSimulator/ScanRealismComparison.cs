@@ -46,8 +46,14 @@ namespace Test.TopDownSimulator;
 public class ScanRealismComparison
 {
     private const string RealPath = @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.raw";
-    private const string SimulatedPath = @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.full.noisy.simulated.mzML";
-    private const string ModelsPath = @"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.full.noisy.simulated.groundtruth.tsv";
+    /// <summary>
+    /// Which export to compare against: <c>full</c> plus MZLIB_TOPDOWN_SIM_OUTPUT_TAG, the same tag
+    /// <c>AnalysisExample.ExportRep2FullNoisySimulation</c> appends to the files it writes.
+    /// </summary>
+    private static string ExportLabel => "full" + (Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_OUTPUT_TAG")?.Trim() ?? "");
+
+    private static string SimulatedPath => $@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.{ExportLabel}.noisy.simulated.mzML";
+    private static string ModelsPath => $@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.{ExportLabel}.noisy.simulated.groundtruth.tsv";
     private const string OutputDirectory = @"D:\JurkatTopdown\scan-realism";
 
     /// <summary>The noise amplitude at m/z 650 the full noisy export was written with.</summary>
@@ -93,29 +99,30 @@ public class ScanRealismComparison
             ctx.Models, ctx.MinCharge, ctx.MaxCharge, ctx.WidthModel, ctx.ScanTimes,
             noise: new NoiseFloorModel(ExportNoiseLevel, densityScale: 0)).Ms1Scans);
 
-        // Experiments. Each scan gets its own noise amplitude, which the library cannot yet do in
-        // one call, so these simulate the targets one at a time.
-        yield return new Variant("signal-dedup", ctx => PerScan(ctx with { Models = DeduplicateByMass(ctx.Models) },
-            t => new NoiseFloorModel(ExportNoiseLevel, densityScale: 0)));
-        yield return new Variant("noise-oracle", ctx => PerScan(ctx,
-            t => new NoiseFloorModel(MedianNoiseNear(t, NoiseFloorModel.ReferenceMz))));
-        yield return new Variant("noise-it", ctx => PerScan(ctx,
-            t => new NoiseFloorModel(NoiseTimesInjectionTime / t.InjectionTimeMs)));
-        yield return new Variant("noise-it+dedup", ctx => PerScan(ctx with { Models = DeduplicateByMass(ctx.Models) },
-            t => new NoiseFloorModel(NoiseTimesInjectionTime / t.InjectionTimeMs)));
+        // Noise conditioned on each source scan (ScanNoiseConditions): amplitude from injection
+        // time alone, then density as well.
+        yield return new Variant("it-amplitude", ctx => Conditioned(ctx, conditionDensity: false));
+        yield return new Variant("it+density", ctx => Conditioned(ctx, conditionDensity: true));
+        yield return new Variant("signal-it", ctx => Conditioned(ctx, conditionDensity: false, densityScale: 0));
+
+        // A stand-in for species-level deduplication until the sidecar comes from an export that
+        // did it during fitting; models from such a sidecar are already deduplicated.
+        yield return new Variant("it+density+dedup", ctx => Conditioned(
+            ctx with { Models = DeduplicateByMass(ctx.Models) }, conditionDensity: true));
     }
 
-    /// <summary>
-    /// Noise amplitude at m/z 650 times injection time, in intensity·ms. Measured by
-    /// <see cref="NoiseLevelVsInjectionTime"/>: 1.5-2.5e4 whenever AGC limits the fill, falling to
-    /// ~9e3 only in the empty pre-elution scans.
-    /// </summary>
-    private const double NoiseTimesInjectionTime = 2.0e4;
+    private static MsDataScan[] Conditioned(SimulationContext ctx, bool conditionDensity, double densityScale = 1.0)
+    {
+        var sources = ctx.Targets.Select(t => new MsDataScan(
+            new MzSpectrum(t.Mz, t.Intensity, false), t.ScanNumber, 1, true, Polarity.Positive, t.RetentionTime,
+            new MzLibUtil.MzRange(600, 2000), "real", MZAnalyzerType.Orbitrap, t.Intensity.Sum(),
+            t.InjectionTimeMs, null, $"scan={t.ScanNumber}")).ToArray();
+        var scanNoise = ScanNoiseConditions.FromSourceScans(
+            sources, new NoiseFloorModel(ExportNoiseLevel, densityScale), conditionDensity: conditionDensity);
 
-    private static MsDataScan[] PerScan(SimulationContext ctx, Func<RealScan, NoiseFloorModel> noiseFor) =>
-        ctx.Targets.Select(t => new Simulator().PrepareMs1(
-            ctx.Models, ctx.MinCharge, ctx.MaxCharge, ctx.WidthModel, new[] { t.RetentionTime },
-            noise: noiseFor(t), noiseSeed: t.Ms1Ordinal).Ms1Scans[0]).ToArray();
+        return new Simulator().PrepareMs1(
+            ctx.Models, ctx.MinCharge, ctx.MaxCharge, ctx.WidthModel, ctx.ScanTimes, scanNoise: scanNoise).Ms1Scans;
+    }
 
     /// <summary>
     /// Keeps one model per species, where a species is a mass within 0.05 Da eluting within half a
@@ -274,6 +281,32 @@ public class ScanRealismComparison
             Console.WriteLine($"  {intensity,10:E2}  M {m.MonoisotopicMass,10:F2}  A {m.Abundance,9:E2}  " +
                               $"rt {m.RtProfile.Mu:F2}/{m.RtProfile.Sigma:F2}  z {((GaussianChargeDistribution)m.ChargeDistribution).MuZ:F1}  " +
                               $"{m.Identifier![..Math.Min(60, m.Identifier.Length)]}");
+    }
+
+    /// <summary>
+    /// How many noise-like peaks each scan carries, and where, against injection time and TIC. A
+    /// noise-like peak has no charge assigned and S/N under 10, which excludes nearly all analyte.
+    /// </summary>
+    [Test]
+    [Explicit("Prints the noise-peak density of real scans across the run")]
+    public static void NoiseDensityAcrossRun()
+    {
+        double[] edges = { 600, 700, 800, 900, 1000, 1200, 1400, 2000 };
+        using var raw = OpenRaw();
+        Console.WriteLine($"{"scan",6} {"RT",6} {"IT",7} {"TIC",9} {"peaks",6} {"noise",6} " +
+                          string.Join(" ", edges.Zip(edges.Skip(1), (a, b) => $"{a:F0}-{b:F0}".PadLeft(9))));
+        for (int n = raw.RunHeaderEx.FirstSpectrum; n <= raw.RunHeaderEx.LastSpectrum; n++)
+        {
+            if (n % 60 > 1 || !IsMs1(raw, n)) continue;
+            var stream = raw.GetCentroidStream(n, false);
+            var noise = Enumerable.Range(0, stream.Masses.Length)
+                .Where(i => stream.Charges[i] == 0 && stream.Intensities[i] < 10 * stream.Noises[i])
+                .Select(i => stream.Masses[i]).ToArray();
+            var bins = edges.Zip(edges.Skip(1), (a, b) => noise.Count(m => m >= a && m < b));
+            double tic = raw.GetScanStatsForScanNumber(n).TIC;
+            Console.WriteLine($"{n,6} {raw.RetentionTimeFromScanNumber(n),6:F1} {InjectionTime(raw, n),7:F2} {tic,9:E1} " +
+                              $"{stream.Masses.Length,6} {noise.Length,6} " + string.Join(" ", bins.Select(b => $"{b,9}")));
+        }
     }
 
     private static RealScan[] ReadRealTargets()

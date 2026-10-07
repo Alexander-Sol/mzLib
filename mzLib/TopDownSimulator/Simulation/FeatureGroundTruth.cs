@@ -71,6 +71,27 @@ public static class FeatureGroundTruth
         IIntensityFloor intensityFloor)
     {
         if (intensityFloor is null) throw new ArgumentNullException(nameof(intensityFloor));
+        if (scanTimes is null) throw new ArgumentNullException(nameof(scanTimes));
+        var floors = new IIntensityFloor[scanTimes.Length];
+        Array.Fill(floors, intensityFloor);
+        return Build(proteoforms, minCharge, maxCharge, widthModel, scanTimes, oneBasedScanNumbers, scanMzs, floors);
+    }
+
+    /// <summary>
+    /// As above, with the detection limit of scan s given by <paramref name="scanFloors"/>[s], for
+    /// simulations whose noise floor changes from scan to scan.
+    /// </summary>
+    public static SimulatedFeature[] Build(
+        IReadOnlyList<ProteoformModel> proteoforms,
+        int minCharge,
+        int maxCharge,
+        IPeakWidthModel widthModel,
+        double[] scanTimes,
+        int[] oneBasedScanNumbers,
+        IReadOnlyList<double[]> scanMzs,
+        IReadOnlyList<IIntensityFloor> scanFloors)
+    {
+        if (scanFloors is null) throw new ArgumentNullException(nameof(scanFloors));
         if (proteoforms is null) throw new ArgumentNullException(nameof(proteoforms));
         if (widthModel is null) throw new ArgumentNullException(nameof(widthModel));
         if (scanTimes is null) throw new ArgumentNullException(nameof(scanTimes));
@@ -80,6 +101,8 @@ public static class FeatureGroundTruth
             throw new ArgumentException("Scan numbers must be parallel to scan times.", nameof(oneBasedScanNumbers));
         if (scanMzs.Count != scanTimes.Length)
             throw new ArgumentException("There must be one peak list per scan.", nameof(scanMzs));
+        if (scanFloors.Count != scanTimes.Length)
+            throw new ArgumentException("There must be one floor per scan.", nameof(scanFloors));
         if (minCharge < 1 || maxCharge < minCharge)
             throw new ArgumentException("Charge range must satisfy 1 ≤ minCharge ≤ maxCharge.");
 
@@ -130,12 +153,15 @@ public static class FeatureGroundTruth
                 }
 
                 // The brightest this (proteoform, charge) can ever be, against the lowest floor
-                // anywhere under its envelope. Charge states far out on the Gaussian never clear the
-                // floor, and skipping them here is what keeps this cheap over a wide global charge
-                // range. Taking the minimum floor keeps the early-out conservative: a charge state
-                // dropped here could not have cleared the floor at any m/z it occupies.
-                double envelopeFloor = intensityFloor.MinOver(centroids[0], centroids[^1]);
-                if (model.Abundance * maxRt * fz * maxShape < envelopeFloor)
+                // anywhere under its envelope in any scan. Charge states far out on the Gaussian
+                // never clear the floor, and skipping them here is what keeps this cheap over a
+                // wide global charge range. Taking the minimum floor keeps the early-out
+                // conservative: a charge state dropped here could not have cleared the floor at
+                // any m/z it occupies in any scan.
+                double lowestFloor = double.PositiveInfinity;
+                for (int s = 0; s < nScans; s++)
+                    lowestFloor = Math.Min(lowestFloor, scanFloors[s].MinOver(centroids[0], centroids[^1]));
+                if (model.Abundance * maxRt * fz * maxShape < lowestFloor)
                     continue;
 
                 int firstScan = -1, lastScan = -1, apexScan = -1;
@@ -145,8 +171,9 @@ public static class FeatureGroundTruth
 
                 for (int s = 0; s < nScans; s++)
                 {
+                    var intensityFloor = scanFloors[s];
                     double scale = model.Abundance * rtValues[s] * fz;
-                    if (scale * maxShape < envelopeFloor)
+                    if (scale * maxShape < intensityFloor.MinOver(centroids[0], centroids[^1]))
                         continue;
 
                     double scanSum = 0, scanBest = 0, scanBestMz = 0;

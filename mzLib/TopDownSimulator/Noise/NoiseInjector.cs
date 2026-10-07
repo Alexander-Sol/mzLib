@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using MassSpectrometry;
 using MzLibUtil;
@@ -41,10 +42,12 @@ public sealed record NoiseInjectionSummary(
 /// </remarks>
 public sealed class NoiseInjector
 {
-    private readonly NoiseFloorModel _model;
+    private readonly NoiseFloorModel? _model;
+    private readonly IReadOnlyList<NoiseFloorModel>? _scanModels;
     private readonly IPeakWidthModel _widthModel;
     private readonly PeakJitterModel? _jitter;
-    private readonly IIntensityFloor _floor;
+    private readonly IIntensityFloor? _floor;
+    private readonly IReadOnlyList<IIntensityFloor>? _scanFloors;
     private readonly double _mergeWithinSigmas;
     private readonly int _seed;
 
@@ -81,9 +84,44 @@ public sealed class NoiseInjector
         _seed = seed;
     }
 
+    /// <summary>
+    /// Noise conditions that change from scan to scan: <paramref name="scanModels"/>[s] and
+    /// <paramref name="scanFloors"/>[s] apply to scan s, and both must have one entry per scan
+    /// passed to <see cref="Apply"/>. See <see cref="ScanNoiseConditions"/>.
+    /// </summary>
+    /// <param name="scanFloors">Per-scan detection limits, or null for each model's own <see cref="NoiseRelativeFloor"/>.</param>
+    public NoiseInjector(
+        IReadOnlyList<NoiseFloorModel> scanModels,
+        IPeakWidthModel widthModel,
+        int seed = 0,
+        double mergeWithinSigmas = 1.0,
+        PeakJitterModel? jitter = null,
+        IReadOnlyList<IIntensityFloor>? scanFloors = null)
+    {
+        _scanModels = scanModels ?? throw new ArgumentNullException(nameof(scanModels));
+        _widthModel = widthModel ?? throw new ArgumentNullException(nameof(widthModel));
+        if (!(mergeWithinSigmas >= 0) || !double.IsFinite(mergeWithinSigmas))
+            throw new ArgumentOutOfRangeException(nameof(mergeWithinSigmas), mergeWithinSigmas,
+                "Merge width must be finite and non-negative.");
+        if (scanFloors is not null && scanFloors.Count != scanModels.Count)
+            throw new ArgumentException("There must be one floor per scan model.", nameof(scanFloors));
+
+        _jitter = jitter is { IsActive: true } ? jitter : null;
+        _scanFloors = scanFloors ?? scanModels.Select(m => (IIntensityFloor)new NoiseRelativeFloor(m)).ToArray();
+        _mergeWithinSigmas = mergeWithinSigmas;
+        _seed = seed;
+    }
+
+    private NoiseFloorModel ModelFor(int scan) => _scanModels is null ? _model! : _scanModels[scan];
+
+    private IIntensityFloor FloorFor(int scan) => _scanFloors is null ? _floor! : _scanFloors[scan];
+
     public (MsDataScan[] Scans, NoiseInjectionSummary Summary) Apply(MsDataScan[] scans)
     {
         if (scans is null) throw new ArgumentNullException(nameof(scans));
+        if (_scanModels is not null && _scanModels.Count != scans.Length)
+            throw new ArgumentException(
+                $"The injector was built for {_scanModels.Count} scans but was given {scans.Length}.", nameof(scans));
 
         var result = new MsDataScan[scans.Length];
         var signalCounts = new long[scans.Length];
@@ -104,13 +142,14 @@ public sealed class NoiseInjector
             else
             {
                 droppedCounts[s] = AddJitteredSignal(
-                    spectrum.XArray, spectrum.YArray, StreamForScan(_seed, s, JitterStream), peaks);
+                    spectrum.XArray, spectrum.YArray, StreamForScan(_seed, s, JitterStream), peaks,
+                    ModelFor(s), FloorFor(s));
             }
 
             signalCounts[s] = peaks.Count;
 
             int beforeNoise = peaks.Count;
-            _model.SampleScan(StreamForScan(_seed, s, NoiseStream), peaks);
+            ModelFor(s).SampleScan(StreamForScan(_seed, s, NoiseStream), peaks);
             noiseCounts[s] = peaks.Count - beforeNoise;
 
             // Jitter can reorder signal peaks past one another, and SampleScan appends its own
@@ -144,7 +183,9 @@ public sealed class NoiseInjector
     /// every peak in it, which is what makes them common-mode; the per-peak terms are drawn
     /// individually and scale with each peak's own S/N.
     /// </remarks>
-    private long AddJitteredSignal(double[] mz, double[] intensities, Random rng, List<SimulatedPeak> into)
+    private long AddJitteredSignal(
+        double[] mz, double[] intensities, Random rng, List<SimulatedPeak> into,
+        NoiseFloorModel model, IIntensityFloor floor)
     {
         var jitter = _jitter!;
         double commonModePpm = jitter.CommonModeMzPpm > 0
@@ -155,7 +196,7 @@ public sealed class NoiseInjector
         long dropped = 0;
         for (int i = 0; i < mz.Length; i++)
         {
-            double noiseLevel = _model.NoiseLevelAt(mz[i]);
+            double noiseLevel = model.NoiseLevelAt(mz[i]);
             double signalToNoise = noiseLevel > 0 ? intensities[i] / noiseLevel : double.PositiveInfinity;
 
             double ppm = commonModePpm + jitter.MzPpmSigma(signalToNoise) * NoiseFloorModel.SampleStandardNormal(rng);
@@ -165,7 +206,7 @@ public sealed class NoiseInjector
                 * commonModeIntensity
                 * PeakJitterModel.IntensityFactor(rng, jitter.LogIntensitySigma(signalToNoise));
 
-            if (jitter.DropPeaksFallingBelowFloor && jitteredIntensity < _floor.At(jitteredMz))
+            if (jitter.DropPeaksFallingBelowFloor && jitteredIntensity < floor.At(jitteredMz))
             {
                 dropped++;
                 continue;

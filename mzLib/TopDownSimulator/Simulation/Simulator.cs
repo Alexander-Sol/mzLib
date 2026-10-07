@@ -56,11 +56,12 @@ public sealed record PrecursorShiftSummary(
 /// Per scan, the m/z of every signal centroid that survived reduction, before jitter and noise.
 /// The feature truth quotes positions from these, so it names peaks that are really in the file.
 /// </param>
+/// <param name="Floors">The detection limit each scan was reduced against.</param>
 public sealed record PreparedSimulation(
     MsDataScan[] Ms1Scans,
     double[] ScanTimes,
     double[][] SignalMz,
-    IIntensityFloor Floor,
+    IIntensityFloor[] Floors,
     NoiseInjectionSummary? Noise);
 
 /// <summary>
@@ -155,6 +156,10 @@ public sealed class Simulator
     /// Defaults to <see cref="PeakJitterModel.Orbitrap"/> whenever noise is supplied, since a noisy
     /// file with perfectly smooth XICs is not a realistic combination.
     /// </param>
+    /// <param name="scanNoise">
+    /// One noise model per scan, replacing <paramref name="noise"/>, for a floor whose amplitude and
+    /// density follow the run. Build it with <see cref="ScanNoiseConditions.FromSourceScans"/>.
+    /// </param>
     public SimulationExportResult WriteMzml(
         IReadOnlyList<ProteoformModel> proteoforms,
         int minCharge,
@@ -167,13 +172,14 @@ public sealed class Simulator
         bool writeGroundTruthSidecar = true,
         NoiseFloorModel? noise = null,
         int noiseSeed = 0,
-        PeakJitterModel? jitter = null)
+        PeakJitterModel? jitter = null,
+        IReadOnlyList<NoiseFloorModel>? scanNoise = null)
     {
         if (string.IsNullOrWhiteSpace(outputPath))
             throw new ArgumentException("An output path is required.", nameof(outputPath));
 
         var prepared = PrepareMs1(
-            proteoforms, minCharge, maxCharge, widthModel, scanTimes, reduction, noise, noiseSeed, jitter);
+            proteoforms, minCharge, maxCharge, widthModel, scanTimes, reduction, noise, noiseSeed, jitter, scanNoise);
 
         var scans = prepared.Ms1Scans;
         var scanNumbers = new int[scans.Length];
@@ -228,7 +234,8 @@ public sealed class Simulator
         NoiseFloorModel? noise = null,
         int noiseSeed = 0,
         PeakJitterModel? jitter = null,
-        bool dropProfileMs2Scans = false)
+        bool dropProfileMs2Scans = false,
+        IReadOnlyList<NoiseFloorModel>? scanNoise = null)
     {
         if (proteoforms is null) throw new ArgumentNullException(nameof(proteoforms));
         if (sourceMs2Scans is null) throw new ArgumentNullException(nameof(sourceMs2Scans));
@@ -240,7 +247,7 @@ public sealed class Simulator
             sourceMs2Scans, massShiftDa, dropProfileMs2Scans);
 
         var prepared = PrepareMs1(
-            shiftedModels, minCharge, maxCharge, widthModel, scanTimes, reduction, noise, noiseSeed, jitter);
+            shiftedModels, minCharge, maxCharge, widthModel, scanTimes, reduction, noise, noiseSeed, jitter, scanNoise);
 
         var merged = ScanListMerger.Merge(prepared.Ms1Scans, shiftedMs2);
 
@@ -302,31 +309,49 @@ public sealed class Simulator
         ScanReductionOptions? reduction = null,
         NoiseFloorModel? noise = null,
         int noiseSeed = 0,
-        PeakJitterModel? jitter = null)
+        PeakJitterModel? jitter = null,
+        IReadOnlyList<NoiseFloorModel>? scanNoise = null)
     {
+        if (scanNoise is not null && scanNoise.Count != scanTimes.Length)
+            throw new ArgumentException("There must be one noise model per scan.", nameof(scanNoise));
+
         var simulation = SimulateCentroided(proteoforms, minCharge, maxCharge, widthModel, scanTimes);
 
         reduction ??= new ScanReductionOptions();
-        if (noise is not null && reduction.Floor is null)
+        if (noise is not null && scanNoise is null && reduction.Floor is null)
             reduction = reduction with { Floor = new NoiseRelativeFloor(noise) };
 
-        var floor = SimulatedScanReducer.ComputeFloor(simulation.Scans, reduction);
-        var scans = SimulatedScanReducer.Reduce(simulation.Scans, reduction);
+        // Per-scan noise brings a per-scan detection limit, unless the caller fixed one.
+        IIntensityFloor[] floors;
+        if (scanNoise is not null && reduction.Floor is null)
+        {
+            floors = new IIntensityFloor[scanTimes.Length];
+            for (int s = 0; s < floors.Length; s++)
+                floors[s] = new NoiseRelativeFloor(scanNoise[s]);
+        }
+        else
+        {
+            floors = new IIntensityFloor[scanTimes.Length];
+            Array.Fill(floors, SimulatedScanReducer.ComputeFloor(simulation.Scans, reduction));
+        }
+
+        var scans = SimulatedScanReducer.Reduce(simulation.Scans, floors);
         var signalMz = new double[scans.Length][];
         for (int s = 0; s < scans.Length; s++)
             signalMz[s] = scans[s].MassSpectrum.XArray;
 
         NoiseInjectionSummary? noiseSummary = null;
-        if (noise is not null)
+        if (scanNoise is not null || noise is not null)
         {
-            var injector = new NoiseInjector(
-                noise, widthModel, noiseSeed,
-                jitter: jitter ?? PeakJitterModel.Orbitrap,
-                floor: floor);
+            var injector = scanNoise is not null
+                ? new NoiseInjector(scanNoise, widthModel, noiseSeed,
+                    jitter: jitter ?? PeakJitterModel.Orbitrap, scanFloors: floors)
+                : new NoiseInjector(noise!, widthModel, noiseSeed,
+                    jitter: jitter ?? PeakJitterModel.Orbitrap, floor: floors.Length > 0 ? floors[0] : null);
             (scans, noiseSummary) = injector.Apply(scans);
         }
 
-        return new PreparedSimulation(scans, (double[])scanTimes.Clone(), signalMz, floor, noiseSummary);
+        return new PreparedSimulation(scans, (double[])scanTimes.Clone(), signalMz, floors, noiseSummary);
     }
 
     /// <summary>
@@ -363,7 +388,7 @@ public sealed class Simulator
 
             var features = FeatureGroundTruth.Build(
                 proteoforms, minCharge, maxCharge, widthModel,
-                prepared.ScanTimes, ms1ScanNumbers, prepared.SignalMz, prepared.Floor);
+                prepared.ScanTimes, ms1ScanNumbers, prepared.SignalMz, prepared.Floors);
 
             featurePath = Path.ChangeExtension(outputPath, ".features.tsv");
             FeatureGroundTruth.Write(features, featurePath);

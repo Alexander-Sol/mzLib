@@ -47,10 +47,30 @@ public sealed class NoiseFloorModel
     /// Reported noise peaks per scan in each 100-Th bin from m/z 600, averaged over the four
     /// calibration files. Sums to ~16 900 peaks per scan, against a measured median of 16 400–17 600.
     /// </summary>
-    private static readonly double[] PeaksPerScanPerBin =
+    private static readonly double[] JurkatPeaksPerScanPerBin =
     {
         3527, 4303, 3504, 2519, 1337, 745, 383, 235, 141, 87.5, 50.8, 29.0, 16.4, 8.2,
     };
+
+    /// <summary>Number of 100-Th bins in the density table, from m/z 600.</summary>
+    public static int BinCount => JurkatPeaksPerScanPerBin.Length;
+
+    /// <summary>Lower m/z edge of density bin <paramref name="bin"/>.</summary>
+    public static double BinStart(int bin) => FirstBinStart + bin * BinWidth;
+
+    /// <summary>
+    /// Noise amplitude at <see cref="ReferenceMz"/> times injection time, in intensity·ms, for the
+    /// Jurkat runs.
+    /// </summary>
+    /// <remarks>
+    /// Reported intensities are normalised by injection time, so a fixed noise charge shows up as an
+    /// amplitude proportional to 1/IT. Over rep2 fract7 this product stays between 1.5e4 and 2.5e4
+    /// wherever AGC limits the fill, while the amplitude itself spans 180 to 49 000. It drops to
+    /// about 9e3 only in empty scans at the maximum injection time.
+    /// </remarks>
+    public const double JurkatNoiseTimesInjectionTime = 2.0e4;
+
+    private readonly double[] _peaksPerBin;
 
     /// <summary>
     /// Noise amplitude in each bin relative to the first, averaged over the four calibration files.
@@ -84,12 +104,30 @@ public sealed class NoiseFloorModel
     /// </remarks>
     public const double JurkatLevelDispersion = 0.42;
 
+    /// <param name="peaksPerScanPerBin">
+    /// Expected noise peaks per scan in each of the <see cref="BinCount"/> 100-Th bins from m/z 600,
+    /// or null for the Jurkat quiet-window calibration. A per-scan table is how
+    /// <see cref="ScanNoiseConditions"/> makes the density follow the run.
+    /// </param>
     public NoiseFloorModel(
         double noiseLevelAtReferenceMz = JurkatNoiseLevelAtReferenceMz,
         double densityScale = 1.0,
         SignalToNoiseDistribution? signalToNoise = null,
-        double levelDispersion = JurkatLevelDispersion)
+        double levelDispersion = JurkatLevelDispersion,
+        double[]? peaksPerScanPerBin = null)
     {
+        if (peaksPerScanPerBin is not null)
+        {
+            if (peaksPerScanPerBin.Length != BinCount)
+                throw new ArgumentException($"A density table needs {BinCount} bins.", nameof(peaksPerScanPerBin));
+            foreach (double n in peaksPerScanPerBin)
+                if (!(n >= 0) || !double.IsFinite(n))
+                    throw new ArgumentOutOfRangeException(nameof(peaksPerScanPerBin), n,
+                        "Bin densities must be finite and non-negative.");
+        }
+
+        _peaksPerBin = (double[])(peaksPerScanPerBin ?? JurkatPeaksPerScanPerBin).Clone();
+
         if (!(noiseLevelAtReferenceMz > 0) || !double.IsFinite(noiseLevelAtReferenceMz))
             throw new ArgumentOutOfRangeException(nameof(noiseLevelAtReferenceMz), noiseLevelAtReferenceMz,
                 "Noise level must be finite and positive.");
@@ -105,7 +143,7 @@ public sealed class NoiseFloorModel
         LevelDispersion = levelDispersion;
         SignalToNoise = signalToNoise ?? SignalToNoiseDistribution.Orbitrap;
 
-        _binCentres = new double[PeaksPerScanPerBin.Length];
+        _binCentres = new double[_peaksPerBin.Length];
         for (int i = 0; i < _binCentres.Length; i++)
             _binCentres[i] = FirstBinStart + (i + 0.5) * BinWidth;
     }
@@ -139,7 +177,17 @@ public sealed class NoiseFloorModel
     public double MinMz => FirstBinStart;
 
     /// <summary>Highest m/z the calibration covers.</summary>
-    public double MaxMz => FirstBinStart + PeaksPerScanPerBin.Length * BinWidth;
+    public double MaxMz => FirstBinStart + _peaksPerBin.Length * BinWidth;
+
+    /// <summary>Expected noise peaks per scan in density bin <paramref name="bin"/>, before <see cref="DensityScale"/>.</summary>
+    public double PeaksPerScanInBin(int bin) => _peaksPerBin[bin];
+
+    /// <summary>
+    /// A copy with a different amplitude and, optionally, density table. Dispersion, the S/N
+    /// distribution and <see cref="DensityScale"/> are kept.
+    /// </summary>
+    public NoiseFloorModel With(double noiseLevelAtReferenceMz, double[]? peaksPerScanPerBin = null) =>
+        new(noiseLevelAtReferenceMz, DensityScale, SignalToNoise, LevelDispersion, peaksPerScanPerBin ?? _peaksPerBin);
 
     /// <summary>Expected number of noise peaks in one scan, over the whole calibrated range.</summary>
     public double ExpectedPeaksPerScan
@@ -147,7 +195,7 @@ public sealed class NoiseFloorModel
         get
         {
             double total = 0;
-            foreach (double n in PeaksPerScanPerBin)
+            foreach (double n in _peaksPerBin)
                 total += n;
             return total * DensityScale;
         }
@@ -179,9 +227,9 @@ public sealed class NoiseFloorModel
         if (rng is null) throw new ArgumentNullException(nameof(rng));
         if (into is null) throw new ArgumentNullException(nameof(into));
 
-        for (int bin = 0; bin < PeaksPerScanPerBin.Length; bin++)
+        for (int bin = 0; bin < _peaksPerBin.Length; bin++)
         {
-            double expected = PeaksPerScanPerBin[bin] * DensityScale;
+            double expected = _peaksPerBin[bin] * DensityScale;
             if (expected <= 0) continue;
 
             int count = SamplePoisson(rng, expected);
