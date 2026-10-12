@@ -59,12 +59,12 @@ public class IdOnlySimulation
         };
 
     /// <summary>
-    /// Another rep2 fraction (fract1â€“10, any but the training fract7), identified by MM114_Search_50_50.
+    /// Another rep2 fraction (fract1–10, any but the training fract7), identified by MM114_Search_50_50.
     /// Only fract5 and fract6 have fitted upper bounds.
     /// </summary>
     private static HeldOutRun OtherFraction(string fraction)
     {
-        // fract1â€“4 were acquired a day earlier than fract5â€“10.
+        // fract1–4 were acquired a day earlier than fract5–10.
         string date = int.Parse(fraction["fract".Length..]) <= 4 ? "02-17-20" : "02-18-20";
         string stem = $"{date}_jurkat_td_rep2_{fraction}";
         return new HeldOutRun(stem, $@"{Dir}\Rep2_Raw", Mm114PsmPath(stem));
@@ -296,7 +296,7 @@ public class IdOnlySimulation
     }
 
     /// <summary>
-    /// Per scan, only the peaks at S/N â‰¥ 10 over m/z 600â€“2000, at the target times and summarised over
+    /// Per scan, only the peaks at S/N ≥ 10 over m/z 600–2000, at the target times and summarised over
     /// every 10th scan from 30 to 50 min. The noise level is the real scan's, from its injection time
     /// (<see cref="ScanNoiseConditions"/>), and the simulated scan is cut at the same threshold.
     /// </summary>
@@ -342,7 +342,7 @@ public class IdOnlySimulation
 
     /// <summary>
     /// Per species, the real and simulated envelopes around the apex rep1's own fit places it at:
-    /// isotopologue intensities per charge, summed over apex Â± 0.1 min, over every charge at which the
+    /// isotopologue intensities per charge, summed over apex ± 0.1 min, over every charge at which the
     /// species lands inside the scan window. Judges the signal model species by species, where the
     /// whole-scan metrics only see the tallest peaks and the noise.
     /// </summary>
@@ -362,7 +362,7 @@ public class IdOnlySimulation
             .ToArray();
 
         Console.WriteLine();
-        Console.WriteLine($"Per species ({targets.Length}), envelope summed over the fitted apex Â± {halfWidth} min, charges inside the scan window:");
+        Console.WriteLine($"Per species ({targets.Length}), envelope summed over the fitted apex ± {halfWidth} min, charges inside the scan window:");
         Console.WriteLine($"  {"simulation",-28} {"n",4} {"median cos",10} {"p25 cos",8} {"charge cos",10} {"apex within 1",13} {"log10 ratio p25/p50/p75",24} {"mean |log10 ratio|",18}");
         foreach (var (label, scans) in simulations)
         {
@@ -395,7 +395,7 @@ public class IdOnlySimulation
     /// </summary>
     /// <remarks>
     /// For each species the extractor sums its isotopologue intensities per charge over the anchor's
-    /// retention time Â± 0.25 min, across charges 5 to 40. That observed profile is compared with
+    /// retention time ± 0.25 min, across charges 5 to 40. That observed profile is compared with
     /// f(z) of the fitted model and of both ID-only predictions, by cosine and by whether the most
     /// intense charge lands within one of the observed one. Random peaks inside the extraction windows
     /// add a floor to every observed profile, the same for every model.
@@ -467,9 +467,10 @@ public class IdOnlySimulation
 
     /// <summary>
     /// Calibrates the unidentified-analyte component on rep2: renders rep2's fitted models plus
-    /// <see cref="UnidentifiedAnalytes"/> drawn from them, without noise, on every 5th MS1 scan from
-    /// 30 to 50 min, and picks the count and abundance shift whose summed TIC and number of peaks at
-    /// S/N â‰¥ 10 (against each real scan's injection-time noise) best match the real scans.
+    /// <see cref="UnidentifiedAnalytes"/> drawn from them on every 5th MS1 scan from 30 to 50 min,
+    /// with the AGC-driven noise <see cref="SimulateHeldOutWithoutTemplate"/> injects, and picks the
+    /// count and abundance shift whose summed TIC and number of peaks at S/N ≥ 10 best match the real
+    /// scans. S/N is against each real scan's measured noise level, as <c>CompareSignalPeaks</c> scores it.
     /// Also learns and saves the <see cref="AcquisitionProfile"/>.
     /// </summary>
     [Test]
@@ -485,7 +486,9 @@ public class IdOnlySimulation
         var (fitted, minZ, maxZ, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
         var sample = real.Where(s => s.RetentionTime is >= 30 and <= 50).Where((_, i) => i % 5 == 0).ToArray();
         double[] times = sample.Select(s => s.RetentionTime).ToArray();
-        var noise = sample.Select(s => new NoiseFloorModel(NoiseFloorModel.JurkatNoiseTimesInjectionTime / (s.InjectionTime ?? 50))).ToArray();
+        // The S/N 10 cut CompareSignalPeaks scores against: each real scan's own measured level, which
+        // in the busy region sits 1.2-3.5x above 2e4/IT.
+        var noise = ScanNoiseConditions.FromSourceScans(sample, new NoiseFloorModel(663.0), conditionDensity: false);
         int RealBright(int i) => SignalPeaks.Select(sample[i].MassSpectrum.XArray, sample[i].MassSpectrum.YArray, noise[i], 10, 600, 2000).Mz.Length;
         var realBright = Enumerable.Range(0, sample.Length).Select(RealBright).ToArray();
 
@@ -504,10 +507,14 @@ public class IdOnlySimulation
                           $"noise model sampled on each scan's own density {Median(modelNoiseTic):G3}; real bright peaks {Median(realBright.Select(b => (double)b)):F0}");
 
         var simulator = new Simulator();
+        var template = new NoiseFloorModel();
         (double LogTic, double LogCount) Score(int count, double shift)
         {
             var background = new UnidentifiedAnalytes(count, shift).Draw(fitted, real[0].RetentionTime, real[^1].RetentionTime, seed: 1);
-            var scans = simulator.SimulateCentroided(fitted.Concat(background).ToArray(), minZ, maxZ, width, times).Scans;
+            // Rendered as SimulateHeldOutWithoutTemplate renders them, noise included: the noise's own
+            // tail above S/N 10 is part of what has to match the real bright peaks.
+            var scans = simulator.PrepareMs1(fitted.Concat(background).ToArray(), minZ, maxZ, width, times, noiseSeed: 1,
+                scanNoiseFromSignal: signal => profile.NoiseModels(signal, template)).Ms1Scans;
             var selected = Enumerable.Range(0, sample.Length)
                 .Select(i => SignalPeaks.Select(scans[i].MassSpectrum.XArray, scans[i].MassSpectrum.YArray, noise[i], 10, 600, 2000)).ToArray();
             var tic = Enumerable.Range(0, sample.Length).Select(i => Math.Log10((1 + selected[i].Intensity.Sum()) / (1 + realBrightTic[i]))).ToArray();
@@ -517,11 +524,12 @@ public class IdOnlySimulation
 
         // Below S/N 10 the acquisition profile's density curve already carries the load: it was
         // measured as every peak under S/N 10, unidentified analytes included. So the unidentified
-        // component is calibrated on the bright part of the spectrum only.
-        Console.WriteLine($"{sample.Length} scans, 30-50 min; median log10(sim/real) of the TIC and the number of peaks at S/N >= 10:");
+        // component is calibrated on the bright part of the spectrum only, with the noise's own bright
+        // tail counted in.
+        Console.WriteLine($"{sample.Length} scans, 30-50 min; median log10(sim/real) of the TIC and the number of peaks at S/N >= 10, noise injected:");
         var best = (Count: 0, Shift: 0.0, Error: double.PositiveInfinity);
         foreach (int count in new[] { 0, 500, 1000, 2000, 4000, 8000 })
-        foreach (double shift in count == 0 ? new[] { 0.0 } : new[] { -2.0, -1.5, -1.0, -0.5, 0.0 })
+        foreach (double shift in count == 0 ? new[] { 0.0 } : new[] { -2.5, -2.0, -1.5, -1.0, -0.5, 0.0 })
         {
             var (tic, bright) = Score(count, shift);
             double error = tic * tic + bright * bright;
@@ -692,7 +700,7 @@ public class IdOnlySimulation
     }
 
     /// <summary>
-    /// The species of the histone window (40â€“44 min, 11â€“16 kDa) of the held-out run, as grouped, with
+    /// The species of the histone window (40–44 min, 11–16 kDa) of the held-out run, as grouped, with
     /// what each identification measured (precursor mass) against what it claims (theoretical mass),
     /// and what the joint refit against the raw file left each species. Species whose members'
     /// precursor masses fall on another species' envelope are flagged: they are the same MS1 signal
@@ -733,7 +741,7 @@ public class IdOnlySimulation
             string masses = string.Join(" ", s.Members.Where(m => m.PrecursorMass is > 0).Select(m => m.PrecursorMass!.Value).Distinct().Take(3).Select(m => m.ToString("F1")));
             string seq = System.Text.RegularExpressions.Regex.Replace(s.Anchor.FullSequence, @"\[[^\]]*:([^\]]*)\]", "[$1]");
             Console.WriteLine($"  {s.Anchor.MonoisotopicMass,9:F2} {s.Anchor.RetentionTime,6:F2} {s.Members.Length,3} {masses,-28} {refit,11} {pred,10}  " +
-                              $"{(seq.Length > 60 ? seq[..60] + "â€¦" : seq)}" +
+                              $"{(seq.Length > 60 ? seq[..60] + "…" : seq)}" +
                               (others.Length > 0 ? $"  << {others.Length} other IDs measured here: {string.Join(", ", others.Select(o => o.MonoisotopicMass.ToString("F1")).Distinct().Take(4))}" : ""));
         }
 
@@ -742,8 +750,8 @@ public class IdOnlySimulation
 
     /// <summary>
     /// Scores the sparse scans of the busy region: the real MS1 scans from 30 to 50 min with the
-    /// fewest peaks at S/N â‰¥ 10 (but at least 20), where a few species carry clear signal. For each,
-    /// the nearest scan of every simulation is compared on its S/N â‰¥ 10 peaks (threshold from the real
+    /// fewest peaks at S/N ≥ 10 (but at least 20), where a few species carry clear signal. For each,
+    /// the nearest scan of every simulation is compared on its S/N ≥ 10 peaks (threshold from the real
     /// scan's injection time), and the identified species eluting there are listed.
     /// </summary>
     [Test]

@@ -488,19 +488,23 @@ circular. TIC, IT and density come straight from the raw data.
 - `CompareRunLoad` compares the per-minute median log TIC with the real run's.
 
 **Results** (`FIT_TAG=.v5`, `GROUPING=precursor`, calibration on rep2 fract7, MM114 search), simulated
-minus real, in dex:
+minus real, in dex. "Before" is `notemplate`, "after" is `notemplate-idload`. The numbers are with the
+noise-injected calibration (next section). The first run, with the signal-only calibration, gave the
+same picture with biases about 0.05 dex less negative.
 
 | Held out | IDs | Load scale | Bias 30–70, before → after | RMSE 30–70 | Integrated TIC 15–70 |
 |---|---|---|---|---|---|
-| fract2 | 490 | +0.23 | −0.17 → −0.16 | 0.50 → 0.47 | −0.01 → +0.05 |
-| fract3 | 1232 | +0.53 | −0.28 → −0.18 | 0.47 → 0.45 | −0.15 → +0.05 |
-| fract4 | 1592 | +0.79 | −0.49 → −0.32 | 0.66 → 0.59 | −0.29 → −0.02 |
-| fract6 | 1246 | +0.46 | −0.29 → −0.21 | 0.49 → 0.46 | −0.25 → −0.04 |
-| fract9 | 116 | (−1.47 unguarded) | +0.17 → −0.33 unguarded | 0.36 → 0.58 unguarded | +0.29 → −0.63 unguarded |
+| fract2 | 490 | +0.23 | −0.24 → −0.25 | 0.49 → 0.51 | −0.04 → +0.02 |
+| fract3 | 1232 | +0.53 | −0.33 → −0.25 | 0.48 → 0.46 | −0.17 → +0.02 |
+| fract4 | 1592 | +0.79 | −0.50 → −0.37 | 0.66 → 0.59 | −0.30 → −0.06 |
+| fract6 | 1246 | +0.46 | −0.34 → −0.25 | 0.51 → 0.46 | −0.28 → −0.08 |
+| fract9 | 116 | guarded | +0.09 → +0.09 | 0.30 → 0.30 | +0.17 → +0.17 |
 
-- **The run total is fixed.** With enough IDs the integrated TIC lands within 0.05 dex of the
-  real one. fract9 shows why the guard exists. Guarded, it falls back to the unscaled draws, the
-  "before" column.
+- **The run total is fixed.** With enough IDs the integrated TIC lands within 0.08 dex of the
+  real one.
+- **fract9 shows why the guard exists.** Unguarded, with the signal-only calibration, its scale of
+  −1.47 dex put the integrated TIC at −0.63 against +0.29. Guarded, the output is identical to
+  `notemplate`.
 - **The per-minute error barely moves (RMSE −0.02 to −0.07).** What remains is load where the run
   has no identifications:
   - fract3/4 at 20–30 min: −1.9 to −2.7 dex. These early eluters are absent from fract7.
@@ -508,9 +512,53 @@ minus real, in dex:
 
   Identifications cannot place load where nothing was identified.
 
+### Calibrating the unidentified load with the noise injected
+
+`CalibrateTemplateFreeModel` used to calibrate on bare signal, so it missed the noise's own tail
+above S/N 10. It also cut S/N at 2·10⁴/IT, while `CompareSignalPeaks` scores against each real scan's
+measured level, which is 1.2–3.5× higher in the busy region.
+
+**What changed:**
+- Each candidate is rendered through `PrepareMs1`, with
+  `scanNoiseFromSignal: profile.NoiseModels`. That is the same AGC-driven noise, detection floor and
+  jitter that `SimulateHeldOutWithoutTemplate` writes.
+- S/N is cut against `ScanNoiseConditions.FromSourceScans(..., conditionDensity: false)`, as in the
+  scoring.
+- The grid gained a −2.5 shift.
+- The signal-only `.v5` choice is kept as `unidentified.…v5.signal-only.json`.
+
+**Result on rep2 fract7:** 1000 species at −1.0 dex, where the old calibration chose 4000 at −1.5.
+- On the new grid the old choice scores +0.26 dex in bright TIC and +0.23 dex in bright-peak count.
+  That is the overshoot the held-out comparison showed.
+- With noise and nothing unidentified, the scans are 0.53 dex short in bright TIC and 0.51 in
+  bright-peak count. The noise alone does not fill the bright region.
+- The re-learned acquisition profile has a load ratio below/above S/N 10 of 0.84, against 0.95
+  before.
+
+**rep1 fract7 `notemplate`, before → after** (`CompareHeldOut`):
+
+| | Before | After | Fitted upper bound |
+|---|---|---|---|
+| S/N ≥ 10 count ratio, 30–50 min | 1.51 | **1.07** | 0.67 |
+| S/N ≥ 10 TIC ratio, 30–50 min | 1.74 | **0.88** | 0.68 |
+| S/N ≥ 10 cos, 30–50 min | 0.061 | 0.038 | 0.190 |
+| 35.1 min bright peaks (real 191) | 414 (TIC 4.88×) | 132 (0.71×) | 42 |
+| Whole-run TIC ratio / log TIC r | 0.98 / 0.896 | 0.96 / 0.898 | 0.85 / 0.971 |
+| Per-species envelope cos / apex within 1 | 0.796 / 68 % | 0.791 / 62 % | 0.856 / 85 % |
+
+**Reading it:**
+- **The bright load is now right in amount.**
+- **It is not right in place.** Matched fractions and cosine stay near zero, because the synthetic
+  unidentified species are not where the real ones are.
+- **Whole-scan TIC at 35.1 min fell to 0.38×.** With less bright load, AGC sets a longer injection
+  time, and the noise amplitude drops with it.
+- **Per-species apex placement lost 6 points.** The unidentified species are now fewer but 0.5 dex
+  brighter each, so the ones that overlap an identified envelope distort it more.
+
 ## Next
 
-1. Calibrate the unidentified component with the noise injected, so its tail above S/N 10 counts.
+1. ~~Calibrate the unidentified component with the noise injected~~. Done (above): the bright count
+   1.51 → 1.07, bright TIC 1.74 → 0.88. Placement of the unidentified species remains (cos ≈ 0.04).
 2. ~~Scale the unidentified load with the identified load~~. Done (`notemplate-idload`, above). It fixes
    the run total but not the per-minute shape. What remains: load in stretches with no
    identifications (early eluters at 20–30 min in fract1–4, and 50–75 min in every run), and
