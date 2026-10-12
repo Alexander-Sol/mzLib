@@ -54,17 +54,31 @@ public class IdOnlySimulation
     private static HeldOutRun HeldOut =>
         Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_IDONLY_HELDOUT")?.Trim().ToLowerInvariant() switch
         {
-            "rep2-fract6" => OtherFraction("fract6"),
-            "rep2-fract5" => OtherFraction("fract5"),
+            { } v when v.StartsWith("rep2-fract") => OtherFraction(v["rep2-".Length..]),
             _ => new HeldOutRun("02-18-20_jurkat_td_rep1_fract7", Dir, PsmPath("02-18-20_jurkat_td_rep1_fract7")),
         };
 
+    /// <summary>
+    /// Another rep2 fraction (fract1â€“10, any but the training fract7), identified by MM114_Search_50_50.
+    /// Only fract5 and fract6 have fitted upper bounds.
+    /// </summary>
     private static HeldOutRun OtherFraction(string fraction)
     {
-        string stem = $"02-18-20_jurkat_td_rep2_{fraction}";
-        return new HeldOutRun(stem, $@"{Dir}\Rep2_Raw",
-            $@"{Dir}\Rep2_Raw\MM114_Search_50_50\Task1-SearchTask\Individual File Results\{stem}_Proteoforms.psmtsv");
+        // fract1â€“4 were acquired a day earlier than fract5â€“10.
+        string date = int.Parse(fraction["fract".Length..]) <= 4 ? "02-17-20" : "02-18-20";
+        string stem = $"{date}_jurkat_td_rep2_{fraction}";
+        return new HeldOutRun(stem, $@"{Dir}\Rep2_Raw", Mm114PsmPath(stem));
     }
+
+    private static string Mm114PsmPath(string stem) =>
+        $@"{Dir}\Rep2_Raw\MM114_Search_50_50\Task1-SearchTask\Individual File Results\{stem}_Proteoforms.psmtsv";
+
+    /// <summary>
+    /// <paramref name="stem"/>'s identifications from the search the held-out run's come from, so that
+    /// precursor intensities compare: Classic and IsoDec deconvolution report different ones.
+    /// </summary>
+    private static string SameSearchPsmPath(string stem) =>
+        HeldOut.PsmPath.Contains("MM114_Search_50_50") ? Mm114PsmPath(stem) : PsmPath(stem);
 
     private static string TestStem => HeldOut.Stem;
 
@@ -244,7 +258,7 @@ public class IdOnlySimulation
             ("fitted (upper bound)", ReadMs1(FittedMzml(TestStem))),
         };
         foreach (var charge in ChargePredictors)
-        foreach (string template in new[] { "self", "train", "notemplate" })
+        foreach (string template in new[] { "self", "train", "notemplate", "notemplate-idload" })
             if (File.Exists(IdOnlyMzml(template, charge)))
                 simulations.Add(($"ids, {template}{ChargeSuffix(charge)}", ReadMs1(IdOnlyMzml(template, charge))));
 
@@ -282,7 +296,7 @@ public class IdOnlySimulation
     }
 
     /// <summary>
-    /// Per scan, only the peaks at S/N ≥ 10 over m/z 600–2000, at the target times and summarised over
+    /// Per scan, only the peaks at S/N â‰¥ 10 over m/z 600â€“2000, at the target times and summarised over
     /// every 10th scan from 30 to 50 min. The noise level is the real scan's, from its injection time
     /// (<see cref="ScanNoiseConditions"/>), and the simulated scan is cut at the same threshold.
     /// </summary>
@@ -328,7 +342,7 @@ public class IdOnlySimulation
 
     /// <summary>
     /// Per species, the real and simulated envelopes around the apex rep1's own fit places it at:
-    /// isotopologue intensities per charge, summed over apex ± 0.1 min, over every charge at which the
+    /// isotopologue intensities per charge, summed over apex Â± 0.1 min, over every charge at which the
     /// species lands inside the scan window. Judges the signal model species by species, where the
     /// whole-scan metrics only see the tallest peaks and the noise.
     /// </summary>
@@ -348,7 +362,7 @@ public class IdOnlySimulation
             .ToArray();
 
         Console.WriteLine();
-        Console.WriteLine($"Per species ({targets.Length}), envelope summed over the fitted apex ± {halfWidth} min, charges inside the scan window:");
+        Console.WriteLine($"Per species ({targets.Length}), envelope summed over the fitted apex Â± {halfWidth} min, charges inside the scan window:");
         Console.WriteLine($"  {"simulation",-28} {"n",4} {"median cos",10} {"p25 cos",8} {"charge cos",10} {"apex within 1",13} {"log10 ratio p25/p50/p75",24} {"mean |log10 ratio|",18}");
         foreach (var (label, scans) in simulations)
         {
@@ -381,7 +395,7 @@ public class IdOnlySimulation
     /// </summary>
     /// <remarks>
     /// For each species the extractor sums its isotopologue intensities per charge over the anchor's
-    /// retention time ± 0.25 min, across charges 5 to 40. That observed profile is compared with
+    /// retention time Â± 0.25 min, across charges 5 to 40. That observed profile is compared with
     /// f(z) of the fitted model and of both ID-only predictions, by cosine and by whether the most
     /// intense charge lands within one of the observed one. Random peaks inside the extraction windows
     /// add a floor to every observed profile, the same for every model.
@@ -455,7 +469,7 @@ public class IdOnlySimulation
     /// Calibrates the unidentified-analyte component on rep2: renders rep2's fitted models plus
     /// <see cref="UnidentifiedAnalytes"/> drawn from them, without noise, on every 5th MS1 scan from
     /// 30 to 50 min, and picks the count and abundance shift whose summed TIC and number of peaks at
-    /// S/N ≥ 10 (against each real scan's injection-time noise) best match the real scans.
+    /// S/N â‰¥ 10 (against each real scan's injection-time noise) best match the real scans.
     /// Also learns and saves the <see cref="AcquisitionProfile"/>.
     /// </summary>
     [Test]
@@ -534,11 +548,34 @@ public class IdOnlySimulation
         var priors = IdOnlyPriors.Load(PriorsPath);
         var profile = AcquisitionProfile.Load(AcquisitionProfilePath);
         var unidentified = System.Text.Json.JsonSerializer.Deserialize<UnidentifiedAnalytes>(File.ReadAllText(UnidentifiedPath))!;
-        var species = LoadSpecies(TestStem);
+        var records = new MmResultLoader().LoadQualified(HeldOut.PsmPath, TestStem, QValue);
+        var species = GroupSpecies(records);
         var models = priors.Predict(species, chargePredictor: Charge);
         var (fitted, _, _, width) = Simulator.ReadGroundTruth(FittedSidecar(TrainStem));
         double[] scanTimes = profile.ScanTimes();
-        var background = unidentified.Draw(fitted, scanTimes[0], scanTimes[^1], seed: 1);
+
+        // MZLIB_TOPDOWN_SIM_IDONLY_LOAD=ids: scale the unidentified load by the identified precursor
+        // intensity against the training run's in the same search, and place half of it where this
+        // run's identifications are.
+        bool idLoad = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_IDONLY_LOAD")?.Trim().ToLowerInvariant() == "ids";
+        var identifiedLoad = records.Select(r => (r.RetentionTime, r.PrecursorIntensity ?? 0)).ToArray();
+        double loadScale = 1;
+        if (idLoad)
+        {
+            var reference = new MmResultLoader().LoadQualified(SameSearchPsmPath(TrainStem), TrainStem, QValue);
+            double? scale = UnidentifiedAnalytes.LoadScale(identifiedLoad.Select(p => p.Item2), reference.Select(r => r.PrecursorIntensity ?? 0));
+            // Too few identifications to trust: keep the training run's load and RT structure.
+            if (scale is { } s)
+            {
+                loadScale = s;
+                unidentified = unidentified with { FollowIdentified = 0.5 };
+            }
+
+            Console.WriteLine($"identified load: {records.Count} IDs against {reference.Count} in the training run, " +
+                              (scale is null ? $"under {UnidentifiedAnalytes.MinimumIdentificationsForLoad}: training load kept" : $"load scale {loadScale:F2} ({Math.Log10(loadScale):+0.00;-0.00} dex)"));
+        }
+
+        var background = unidentified.Draw(fitted, scanTimes[0], scanTimes[^1], seed: 1, identifiedLoad, loadScale);
 
         var charges = models.Concat(background).Select(m => (GaussianChargeDistribution)m.ChargeDistribution).ToArray();
         int minZ = Math.Max(2, (int)Math.Floor(charges.Min(c => c.MuZ - 3 * c.SigmaZ)));
@@ -547,11 +584,52 @@ public class IdOnlySimulation
 
         var template = new NoiseFloorModel();
         var export = new Simulator().WriteMzml(
-            models, minZ, maxZ, width, scanTimes, IdOnlyMzml("notemplate", Charge),
+            models, minZ, maxZ, width, scanTimes, IdOnlyMzml(idLoad ? "notemplate-idload" : "notemplate", Charge),
             background: background, scanNoiseFromSignal: scans => profile.NoiseModels(scans, template));
 
         Console.WriteLine($"wrote {export.MzmlPath}: {export.ScanCount} scans, {export.PeakCount / (double)export.ScanCount:F0} peaks/scan, " +
                           $"{export.FeatureCount} features, total {sw.Elapsed}");
+    }
+
+    /// <summary>
+    /// How well the template-free simulations reproduce the held-out run's ion load over retention
+    /// time: per 1-min bin, the median log10 TIC of the simulation against the real run's. Reports the
+    /// bias and RMSE over 30–70 min and the integrated TIC ratio over 15–70 min. Simulated scans carry
+    /// no injection time, so the load is compared through the TIC that AGC acts on.
+    /// </summary>
+    [Test]
+    [Explicit("Compares the simulated ion load over RT with the held-out run's, with and without ID-scaled unidentified load")]
+    public static void CompareRunLoad()
+    {
+        static double[] PerMinute(MsDataScan[] scans) =>
+            Enumerable.Range(0, 90).Select(m =>
+            {
+                var v = scans.Where(s => s.RetentionTime >= m && s.RetentionTime < m + 1)
+                    .Select(s => Math.Log10(1 + s.MassSpectrum.SumOfAllY)).ToArray();
+                return v.Length == 0 ? double.NaN : Median(v);
+            }).ToArray();
+
+        var real = PerMinute(ReadMs1(RawPath(TestStem)));
+        var runs = new List<(string Label, double[] Curve)>();
+        foreach (string template in new[] { "train", "notemplate", "notemplate-idload" })
+            if (File.Exists(IdOnlyMzml(template, Charge)))
+                runs.Add((template, PerMinute(ReadMs1(IdOnlyMzml(template, Charge)))));
+
+        Console.WriteLine($"{TestStem}: median log10 TIC per minute, simulated - real");
+        Console.WriteLine($"  {"simulation",-20} {"bias 30-70",10} {"RMSE 30-70",10} {"log TIC ratio 15-70",19}");
+        foreach (var (label, curve) in runs)
+        {
+            var d = Enumerable.Range(30, 40).Where(m => double.IsFinite(curve[m]) && double.IsFinite(real[m])).Select(m => curve[m] - real[m]).ToArray();
+            double Integrated(double[] c) => Math.Log10(Enumerable.Range(15, 55).Where(m => double.IsFinite(c[m])).Sum(m => Math.Pow(10, c[m])));
+            Console.WriteLine($"  {label,-20} {d.Average(),10:+0.00;-0.00} {Math.Sqrt(d.Average(x => x * x)),10:F2} {Integrated(curve) - Integrated(real),19:+0.00;-0.00}");
+        }
+
+        Console.WriteLine($"  {"RT",7} {"real",6} " + string.Join(" ", runs.Select(r => $"{r.Label,18}")));
+        for (int t0 = 15; t0 < 75; t0 += 5)
+        {
+            double Block(double[] c) => Median(Enumerable.Range(t0, 5).Select(m => c[m]).Where(double.IsFinite));
+            Console.WriteLine($"  {t0,3}-{t0 + 5,-3} {Block(real),6:F2} " + string.Join(" ", runs.Select(r => $"{Block(r.Curve) - Block(real),18:+0.00;-0.00}")));
+        }
     }
 
     /// <summary>
@@ -565,7 +643,7 @@ public class IdOnlySimulation
     {
         var real = ReadMs1(RawPath(TestStem));
         var simulations = new List<(string Label, MsDataScan[] Scans)> { ("fitted", ReadMs1(FittedMzml(TestStem))) };
-        foreach (string template in new[] { "train", "notemplate" })
+        foreach (string template in new[] { "train", "notemplate", "notemplate-idload" })
             if (File.Exists(IdOnlyMzml(template, Charge)))
                 simulations.Add(($"ids, {template}", ReadMs1(IdOnlyMzml(template, Charge))));
 
@@ -614,7 +692,7 @@ public class IdOnlySimulation
     }
 
     /// <summary>
-    /// The species of the histone window (40–44 min, 11–16 kDa) of the held-out run, as grouped, with
+    /// The species of the histone window (40â€“44 min, 11â€“16 kDa) of the held-out run, as grouped, with
     /// what each identification measured (precursor mass) against what it claims (theoretical mass),
     /// and what the joint refit against the raw file left each species. Species whose members'
     /// precursor masses fall on another species' envelope are flagged: they are the same MS1 signal
@@ -655,7 +733,7 @@ public class IdOnlySimulation
             string masses = string.Join(" ", s.Members.Where(m => m.PrecursorMass is > 0).Select(m => m.PrecursorMass!.Value).Distinct().Take(3).Select(m => m.ToString("F1")));
             string seq = System.Text.RegularExpressions.Regex.Replace(s.Anchor.FullSequence, @"\[[^\]]*:([^\]]*)\]", "[$1]");
             Console.WriteLine($"  {s.Anchor.MonoisotopicMass,9:F2} {s.Anchor.RetentionTime,6:F2} {s.Members.Length,3} {masses,-28} {refit,11} {pred,10}  " +
-                              $"{(seq.Length > 60 ? seq[..60] + "…" : seq)}" +
+                              $"{(seq.Length > 60 ? seq[..60] + "â€¦" : seq)}" +
                               (others.Length > 0 ? $"  << {others.Length} other IDs measured here: {string.Join(", ", others.Select(o => o.MonoisotopicMass.ToString("F1")).Distinct().Take(4))}" : ""));
         }
 
@@ -664,8 +742,8 @@ public class IdOnlySimulation
 
     /// <summary>
     /// Scores the sparse scans of the busy region: the real MS1 scans from 30 to 50 min with the
-    /// fewest peaks at S/N ≥ 10 (but at least 20), where a few species carry clear signal. For each,
-    /// the nearest scan of every simulation is compared on its S/N ≥ 10 peaks (threshold from the real
+    /// fewest peaks at S/N â‰¥ 10 (but at least 20), where a few species carry clear signal. For each,
+    /// the nearest scan of every simulation is compared on its S/N â‰¥ 10 peaks (threshold from the real
     /// scan's injection time), and the identified species eluting there are listed.
     /// </summary>
     [Test]
@@ -674,7 +752,7 @@ public class IdOnlySimulation
     {
         var real = ReadMs1(RawPath(TestStem));
         var simulations = new List<(string Label, MsDataScan[] Scans)> { ("fitted", ReadMs1(FittedMzml(TestStem))) };
-        foreach (string template in new[] { "train", "notemplate" })
+        foreach (string template in new[] { "train", "notemplate", "notemplate-idload" })
             if (File.Exists(IdOnlyMzml(template, Charge)))
                 simulations.Add(($"ids, {template}", ReadMs1(IdOnlyMzml(template, Charge))));
         var (fitted, _, _, _) = Simulator.ReadGroundTruth(FittedSidecar(TestStem));

@@ -88,4 +88,43 @@ public class TemplateFreeModelTests
         var again = new UnidentifiedAnalytes(500, -1, 0).Draw(fitted, 25, 45, seed: 3);
         Assert.That(again, Is.EqualTo(drawn));
     }
+
+    [Test]
+    public void UnidentifiedLoadScalesAndFollowsTheIdentifiedLoad()
+    {
+        var fitted = new[]
+        {
+            new ProteoformModel(10000, 1e6, new EmgProfile(30, 0.1, 0), new GaussianChargeDistribution(12, 3), "a"),
+        };
+        var identified = new[] { (Rt: 50.0, Intensity: 9.0), (Rt: 60.0, Intensity: 1.0), (Rt: 70.0, Intensity: 0.0) };
+        var plain = new UnidentifiedAnalytes(2000, 0, LogAbundanceSd: 0, RtSd: 0.1);
+
+        // Without following, the identified load changes nothing but the abundance.
+        var scaled = plain.Draw(fitted, 0, 90, seed: 5, identified, loadScale: 4);
+        var unscaled = plain.Draw(fitted, 0, 90, seed: 5);
+        Assert.That(scaled.Select(m => m.Abundance / 4), Is.EqualTo(unscaled.Select(m => m.Abundance)).Within(1e-6));
+        Assert.That(scaled.Select(m => m.RtProfile.Mu), Is.EqualTo(unscaled.Select(m => m.RtProfile.Mu)));
+
+        // Following entirely, elution centres land on the identifications in proportion to intensity.
+        var followed = (plain with { FollowIdentified = 1 }).Draw(fitted, 0, 90, seed: 5, identified);
+        int at50 = followed.Count(m => Math.Abs(m.RtProfile.Mu - 50) < 1);
+        int at60 = followed.Count(m => Math.Abs(m.RtProfile.Mu - 60) < 1);
+        Assert.That(at50 + at60, Is.EqualTo(2000));
+        Assert.That(at50 / 2000.0, Is.EqualTo(0.9).Within(0.03));
+
+        // Half following: the rest stay on the training model's elution time.
+        var half = (plain with { FollowIdentified = 0.5 }).Draw(fitted, 0, 90, seed: 5, identified);
+        Assert.That(half.Count(m => Math.Abs(m.RtProfile.Mu - 30) < 1) / 2000.0, Is.EqualTo(0.5).Within(0.04));
+    }
+
+    [Test]
+    public void LoadScaleNeedsEnoughIdentifications()
+    {
+        int n = UnidentifiedAnalytes.MinimumIdentificationsForLoad;
+        Assert.That(UnidentifiedAnalytes.LoadScale(Enumerable.Repeat(3.0, n), Enumerable.Repeat(1.0, 2 * n)), Is.EqualTo(1.5).Within(1e-12));
+        Assert.That(UnidentifiedAnalytes.LoadScale(Enumerable.Repeat(3.0, n - 1), Enumerable.Repeat(1.0, 2 * n)), Is.Null);
+        // Missing or zero intensities do not count as identifications.
+        var withGaps = Enumerable.Repeat(3.0, n - 1).Append(0).Append(double.NaN);
+        Assert.That(UnidentifiedAnalytes.LoadScale(withGaps, Enumerable.Repeat(1.0, 2 * n)), Is.Null);
+    }
 }

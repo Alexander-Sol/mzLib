@@ -411,12 +411,110 @@ plus noise TIC lands near the real TIC.
 - **What remains:** the excess bright peaks in the no-template simulation are its synthetic
   unidentified species (34.2, 42.0 and 43.3 min: 4–16× the bright TIC), not noise.
 
+## Noise across runs: a shared floor and a load the identifications predict
+
+**Question:** noise looks very different from run to run. Is there a general template, and do a
+run's identifications predict the rest?
+
+**Data** (`Test/TopDownSimulator/NoiseAcrossRuns.ExportNoiseDescriptors`, about 4 min):
+- Runs: rep2 fract1–10 and rep1 fract6. rep1 fract7 was held by a viewer and skipped.
+- Identifications: q ≤ 0.01 from one search, `Rep2_Raw\MM114_Search_50_50`.
+- Per MS1 scan, the test writes injection time, TIC split at S/N 10 and the MS2 count. Per 100-Th
+  band it writes the noise density and level from `ScanNoiseConditions`.
+- Tables: `D:\JurkatTopdown\noise-across-runs\` (`*.scans.tsv`, `*.ids.tsv`).
+- Analysis: 1-min medians per run.
+
+**Replicates are nearly identical.** rep1 and rep2 fract6, 15–75 min:
+- log TIC RMSE 0.045 dex;
+- log noise density RMSE 0.014 dex.
+
+The differences between runs come from the sample (the fraction), not from run-to-run randomness.
+
+**The noise floor is a shared template.** At 30–70 min, noise density over RT agrees across fract2–10
+to about 0.08 dex RMS. fract1 is about 0.4 dex lower. Noise amplitude × IT agrees to about 0.1 dex.
+The m/z shapes of density and level agree too. Identifications add nothing to any of these.
+
+**What differs is ion load.** AGC makes the absolute noise level ∝ 1/IT ∝ TIC, so the load sets the
+noise level. Median busy-region (30–50 min) log TIC runs from 6.8 (fract1) to 9.8 (fract4).
+
+| Fractions | IDs | log₁₀ (TIC over 15–70 min / Σ ID precursor intensity) |
+|---|---|---|
+| fract2–7 | 490–1592 | 1.30–1.38 |
+| fract8, 9, 10, 1 | 241, 116, 22, 7 | 2.13, 2.35, 3.08, 2.67 |
+
+**Minute by minute,** 30–70 min, leave one run out among fract2–7 (RMSE, dex):
+
+| | Template (mean of other runs) | IDs alone | Template + 0.45 × ID deviation |
+|---|---|---|---|
+| log TIC | 0.353 | 0.480 | 0.277 |
+| log IT | 0.349 | 0.366 | 0.278 |
+| log TIC below S/N 10 | 0.320 | 0.500 | 0.252 |
+| log noise density | 0.082 | 0.168 | 0.082 |
+
+"ID deviation" is the log Σ ID precursor intensity per minute (3-min smoothing), minus the other
+runs' mean.
+
+**Poorly identified fractions,** with both models fitted on fract2–7:
+- **Template:** misses log IT by 0.7–1.1 dex in fract1, 8 and 9.
+- **Identifications:** miss it by 0.26–0.36 dex.
+- **fract10:** fails the other way (log TIC bias +0.33 against the IDs). Its 22 IDs hide a heavy
+  load, likely large proteoforms the search cannot identify; the 90th-percentile ID mass is 23 kDa.
+- **What few IDs cannot tell apart:** a little sample (fract1) or an unidentifiable one (fract10).
+
+**Caveat:** the S/N 10 split uses the per-scan noise estimate, so the bright and dim TICs are partly
+circular. TIC, IT and density come straight from the raw data.
+
+**For the simulator:**
+- Keep density and level shape from the shared RT template (`AcquisitionProfile`).
+- Scale the unidentified load per RT window from Σ ID precursor intensity, about 10^1.35× in total.
+- Treat runs with fewer than ~250 IDs as having an unknown load.
+
+### The unidentified load scaled by the identifications
+
+**The model** (`UnidentifiedAnalytes`):
+- `Draw(..., identifiedLoad, loadScale)` multiplies every unidentified abundance by `loadScale`.
+- `LoadScale` gives the ratio of the simulated run's Σ ID precursor intensity to the calibration
+  run's, from the same search. It returns null under `MinimumIdentificationsForLoad` = 250
+  identifications.
+- `FollowIdentified` = 0.5 centres half the unidentified species on retention times drawn from
+  the run's identifications, weighted by precursor intensity. The other half stay on the
+  training run's elution times.
+- With `FollowIdentified` = 0 and scale 1 the draws are identical to before.
+
+**The harness:**
+- Set `MZLIB_TOPDOWN_SIM_IDONLY_LOAD=ids` in `SimulateHeldOutWithoutTemplate`. The output is the
+  `notemplate-idload` template.
+- `IDONLY_HELDOUT` now takes any `rep2-fractN`.
+- `CompareRunLoad` compares the per-minute median log TIC with the real run's.
+
+**Results** (`FIT_TAG=.v5`, `GROUPING=precursor`, calibration on rep2 fract7, MM114 search), simulated
+minus real, in dex:
+
+| Held out | IDs | Load scale | Bias 30–70, before → after | RMSE 30–70 | Integrated TIC 15–70 |
+|---|---|---|---|---|---|
+| fract2 | 490 | +0.23 | −0.17 → −0.16 | 0.50 → 0.47 | −0.01 → +0.05 |
+| fract3 | 1232 | +0.53 | −0.28 → −0.18 | 0.47 → 0.45 | −0.15 → +0.05 |
+| fract4 | 1592 | +0.79 | −0.49 → −0.32 | 0.66 → 0.59 | −0.29 → −0.02 |
+| fract6 | 1246 | +0.46 | −0.29 → −0.21 | 0.49 → 0.46 | −0.25 → −0.04 |
+| fract9 | 116 | (−1.47 unguarded) | +0.17 → −0.33 unguarded | 0.36 → 0.58 unguarded | +0.29 → −0.63 unguarded |
+
+- **The run total is fixed.** With enough IDs the integrated TIC lands within 0.05 dex of the
+  real one. fract9 shows why the guard exists. Guarded, it falls back to the unscaled draws, the
+  "before" column.
+- **The per-minute error barely moves (RMSE −0.02 to −0.07).** What remains is load where the run
+  has no identifications:
+  - fract3/4 at 20–30 min: −1.9 to −2.7 dex. These early eluters are absent from fract7.
+  - Every run at 50–75 min: −0.5 to −1.0 dex, with or without ID scaling.
+
+  Identifications cannot place load where nothing was identified.
+
 ## Next
 
 1. Calibrate the unidentified component with the noise injected, so its tail above S/N 10 counts.
-2. Scale the unidentified load with the identified load per RT window instead of resampling fitted
-   RTs: the identified signal is the only sample-specific evidence of how loaded a region is.
-   Fract6's busy region is brighter in identified and unidentified signal alike.
+2. ~~Scale the unidentified load with the identified load~~. Done (`notemplate-idload`, above). It fixes
+   the run total but not the per-minute shape. What remains: load in stretches with no
+   identifications (early eluters at 20–30 min in fract1–4, and 50–75 min in every run), and
+   runs with under 250 IDs.
 3. Recover the abundance predictor's top end (H2A at 41.1 min is predicted 0.2–0.7 dex low): the
    regression compresses the range, and the cross-search offset (Classic vs IsoDec precursor
    intensities, −0.14 dex) needs a per-search calibration.
