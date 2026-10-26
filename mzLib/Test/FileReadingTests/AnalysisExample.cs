@@ -544,6 +544,147 @@ namespace Test.FileReadingTests
         }
 
         [Test]
+        [Explicit("Writes the ProteoStar workbench fixture: a real rep2 fract7 RT slice, its confident IDs, and the SimSpec fitted to them")]
+        public static void ExportRep2WorkbenchFixture()
+        {
+            // ProteoStar's simulation workbench shows a real run beside a simulation of it, and its
+            // tests need a top-down pair small enough to commit: a short RT window of the real run,
+            // the confident proteoform IDs inside it, and a SimSpec fitted to those IDs on the
+            // window's own MS1 scan times (so real and simulated scans align one to one).
+            double rtStart = GetFixtureRt("MZLIB_TOPDOWN_SIM_FIXTURE_RT_START", 44.0);
+            double rtEnd = GetFixtureRt("MZLIB_TOPDOWN_SIM_FIXTURE_RT_END", 45.0);
+            // Proteoforms whose apex is just outside the window still put their tails inside it.
+            const double modelMargin = 0.5;
+            const double qValueThreshold = 0.01;
+            const double rtHalfWidth = 0.25;
+            // The raw is centroided, so σ_m cannot be fitted from it; R = 60k at m/z 400.
+            const double defaultPeakWidthK = 3.5e-7;
+
+            string rawPath = ReadableCopy(ResolveLocalPath(@"D:\JurkatTopdown\02-18-20_jurkat_td_rep2_fract7.raw"));
+            string resultPath = ResolveLocalPath(@"D:\JurkatTopdown\Frac7_GPTMD_Search\Task2-TopDownSearch\Individual File Results\02-18-20_jurkat_td_rep2_fract7_Proteoforms.psmtsv");
+            string outDir = Environment.GetEnvironmentVariable("MZLIB_TOPDOWN_SIM_FIXTURE_DIR")
+                            ?? @"D:\JurkatTopdown\fixtures\workbench";
+            const string stem = "02-18-20_jurkat_td_rep2_fract7";
+            string sliceStem = FormattableString.Invariant($"{stem}.rt{rtStart:0.##}-{rtEnd:0.##}");
+            Directory.CreateDirectory(outDir);
+
+            var totalSw = Stopwatch.StartNew();
+            var reader = MsDataFileReader.GetDataFile(rawPath);
+            reader.LoadAllStaticData();
+            var allScans = reader.GetAllScansList().OrderBy(s => s.OneBasedScanNumber).ToArray();
+            var allMs1 = allScans.Where(s => s.MsnOrder == 1).ToArray();
+            var sliceMs1 = allMs1.Where(s => s.RetentionTime >= rtStart && s.RetentionTime <= rtEnd).ToArray();
+            Assert.That(sliceMs1, Is.Not.Empty, "No MS1 scans in the fixture window.");
+            var sliceMs1Numbers = sliceMs1.Select(s => s.OneBasedScanNumber).ToHashSet();
+            Console.WriteLine($"Loaded {allScans.Length} scans in {totalSw.Elapsed}; {sliceMs1.Length} MS1 in {rtStart}-{rtEnd} min");
+
+            // The confident target IDs in the window, as psmtsv rows. Only rows whose MS2 and
+            // precursor MS1 both fall inside the slice are kept, so every row resolves in the file.
+            var lines = File.ReadAllLines(resultPath);
+            var header = lines[0].Split('\t');
+            int Col(string name)
+            {
+                int i = Array.IndexOf(header, name);
+                Assert.That(i, Is.GreaterThanOrEqualTo(0), $"psmtsv has no '{name}' column");
+                return i;
+            }
+            int cFile = Col("File Name"), cScan = Col("Scan Number"), cPrecursor = Col("Precursor Scan Number");
+            int cRt = Col("Scan Retention Time"), cQ = Col("QValue"), cTarget = Col("Decoy/Contaminant/Target");
+            var idRows = lines.Skip(1)
+                .Select(l => l.Split('\t'))
+                .Where(f => Path.GetFileNameWithoutExtension(f[cFile]).Equals(stem, StringComparison.OrdinalIgnoreCase))
+                .Where(f => f[cTarget] == "T")
+                .Where(f => double.TryParse(f[cQ], NumberStyles.Float, CultureInfo.InvariantCulture, out double q) && q <= qValueThreshold)
+                .Where(f =>
+                {
+                    double rt = double.Parse(f[cRt], CultureInfo.InvariantCulture);
+                    return rt >= rtStart && rt <= rtEnd
+                           && int.TryParse(f[cPrecursor], out int precursor) && sliceMs1Numbers.Contains(precursor);
+                })
+                .ToArray();
+            Assert.That(idRows, Is.Not.Empty, "No confident IDs in the fixture window.");
+
+            // All MS1 in the window, plus only the MS2 behind an ID: the other MS2 are most of the
+            // bytes and nothing in the workbench reads them.
+            var keptMs2 = idRows.Select(f => int.Parse(f[cScan])).ToHashSet();
+            var kept = allScans
+                .Where(s => sliceMs1Numbers.Contains(s.OneBasedScanNumber)
+                            || s.MsnOrder > 1 && keptMs2.Contains(s.OneBasedScanNumber))
+                .ToArray();
+            // Renumber 1..N so the file is self-contained, as a file cut from a run should be.
+            var renumber = kept.Select((s, i) => (s.OneBasedScanNumber, i + 1)).ToDictionary(p => p.Item1, p => p.Item2);
+            var renumbered = kept.Select(s => new MsDataScan(
+                s.MassSpectrum, renumber[s.OneBasedScanNumber], s.MsnOrder, s.IsCentroid, s.Polarity,
+                s.RetentionTime, s.ScanWindowRange, s.ScanFilter, s.MzAnalyzer, s.TotalIonCurrent,
+                s.InjectionTime, noiseData: null,
+                nativeId: $"controllerType=0 controllerNumber=1 scan={renumber[s.OneBasedScanNumber]}",
+                s.SelectedIonMZ, s.SelectedIonChargeStateGuess, s.SelectedIonIntensity, s.IsolationMz,
+                s.IsolationWidth, s.DissociationType,
+                s.OneBasedPrecursorScanNumber is int p && renumber.TryGetValue(p, out int np) ? np : null,
+                s.SelectedIonMonoisotopicGuessMz, s.HcdEnergy, s.ScanDescription, s.CompensationVoltage))
+                .ToArray();
+
+            string mzmlPath = Path.Combine(outDir, sliceStem + ".mzML");
+            MzmlMethods.CreateAndWriteMyMzmlWithCalibratedSpectra(
+                new GenericMsDataFile(renumbered, reader.SourceFile), mzmlPath, writeIndexed: false);
+
+            string psmPath = Path.Combine(outDir, sliceStem + "_Proteoforms.psmtsv");
+            File.WriteAllLines(psmPath, new[] { lines[0] }.Concat(idRows.Select(f =>
+            {
+                var g = (string[])f.Clone();
+                g[cFile] = sliceStem + ".mzML";
+                g[cScan] = renumber[int.Parse(f[cScan])].ToString(CultureInfo.InvariantCulture);
+                g[cPrecursor] = renumber[int.Parse(f[cPrecursor])].ToString(CultureInfo.InvariantCulture);
+                return string.Join('\t', g);
+            })));
+
+            // Fit every confident species eluting in or near the window, against the full run's MS1
+            // (an elution profile needs both of its flanks), then simulate on the slice's times.
+            const string kVar = "MZLIB_TOPDOWN_SIM_PEAK_WIDTH_K";
+            string? previousK = Environment.GetEnvironmentVariable(kVar);
+            if (previousK is null)
+                Environment.SetEnvironmentVariable(kVar, defaultPeakWidthK.ToString("R", CultureInfo.InvariantCulture));
+            ProteoformModel[] models;
+            FitBatch fits;
+            try
+            {
+                var records = LoadQualifiedMmRecords(resultPath, stem, qValueThreshold, rtStart - modelMargin, rtEnd + modelMargin);
+                var species = GetDeduplicateProteoforms() ? DeduplicateBySpecies(records) : AsSpecies(records);
+                var extractor = new GroundTruthExtractor(allMs1, ppmTolerance: 20.0, mzWindowHalfWidth: 0.05);
+                fits = FitProteoforms(species, extractor, rtHalfWidth, GetPeakWidthModelEnabled());
+                Assert.That(fits.Fits, Is.Not.Empty, "No proteoforms were fitted near the fixture window.");
+                models = ApplyGlobalRefit(fits.Fits, fits.Truths, fits.MinCharge, fits.MaxCharge, fits.WidthModel,
+                    GetGlobalAbundanceRefitEnabled(), GetGlobalAbundanceRefitMaxModels(), "workbench fixture");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(kVar, previousK);
+            }
+
+            var spec = SimSpec.FromModels(
+                models, fits.MinCharge, fits.MaxCharge, fits.WidthModel,
+                sliceMs1.Select(s => s.RetentionTime).ToArray(),
+                noise: SimNoise.OrbitrapDefaults(seed: 0),
+                generator: SimGenerator.Now(),
+                sourceRun: new SimSourceRun(
+                    FileName: sliceStem + ".mzML",
+                    Description: FormattableString.Invariant(
+                        $"Fitted to the q<={qValueThreshold} proteoforms of {stem} eluting {rtStart - modelMargin}-{rtEnd + modelMargin} min; MS1 scan times of {rtStart}-{rtEnd} min")));
+            string specPath = Path.Combine(outDir, sliceStem + ".simspec.json");
+            spec.Write(specPath);
+
+            Console.WriteLine($"Real slice: {renumbered.Length} scans ({sliceMs1.Length} MS1, {renumbered.Length - sliceMs1.Length} MS2) -> {mzmlPath} ({new FileInfo(mzmlPath).Length / 1e6:F1} MB)");
+            Console.WriteLine($"IDs: {idRows.Length} psmtsv rows -> {psmPath}");
+            Console.WriteLine($"SimSpec: {models.Length} proteoforms, charges {fits.MinCharge}-{fits.MaxCharge}, {fits.WidthModel} -> {specPath}");
+            Console.WriteLine($"Total elapsed: {totalSw.Elapsed}");
+        }
+
+        private static double GetFixtureRt(string variable, double fallback) =>
+            double.TryParse(Environment.GetEnvironmentVariable(variable), NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
+                ? v
+                : fallback;
+
+        [Test]
         [Explicit("Writes centroided simulated mzML for the 31-35 min slice and the full q<=0.01 run of rep2 fract7")]
         public static void ExportRep2SliceAndQValueSimulations()
         {
